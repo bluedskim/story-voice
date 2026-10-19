@@ -79,11 +79,11 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 
 ```bash
 python scripts/serve.py
-# 브라우저: http://localhost:8765/
-# 같은 Wi‑Fi 폰: http://<맥미니-IP>:8765/
+# 기본: http://127.0.0.1:8765/ (Cloudflare Tunnel 등은 localhost로 프록시)
+# 집 Wi‑Fi에서 포트 직접 열기: python scripts/serve.py --host 0.0.0.0
 ```
 
-`serve.py`는 `web/catalog.json`을 갱신하고, `data/audio/`를 `web/audio/`로 연결합니다.
+`serve.py`는 `web/catalog.json`을 갱신한 뒤, 페이지·정적 파일·카탈로그에 있는 `data/audio/<id>.m4a`만 제공합니다 (디렉터리 목록 없음, Safari용 HTTP Range 지원).
 
 ## 프로젝트 구조
 
