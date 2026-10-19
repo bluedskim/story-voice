@@ -29,7 +29,11 @@ uv pip install -r requirements-mlx.txt
 
 ### 2. 부모 목소리 준비
 
-녹음 방법은 [`content/recording_guide.md`](content/recording_guide.md)를 보세요.
+녹음 대본: [`content/record_script.txt`](content/record_script.txt). 자세한 팁은 [`content/recording_guide.md`](content/recording_guide.md).
+
+웹 **목소리** 탭에서 브라우저 녹음(iPhone Safari `audio/mp4`) 또는 파일 업로드 → 받아쓰기 확인 → 저장하면 `data/voice/reference.wav`(24kHz mono)와 `reference.txt`가 생깁니다. 이전 참조는 `data/voice/history/`에 타임스탬프 백업(삭제하지 않음). 길이 **5–40초**, 업로드 **8MB** 이하.
+
+CLI로 직접 넣을 때:
 
 ```bash
 mkdir -p data/voice
@@ -75,15 +79,42 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 
 생성 파일: `data/audio/<id>.m4a` (역시 git 제외).
 
-### 5. 웹 플레이어
+### 5. 웹 플레이어 + 다시 만들기
 
 ```bash
+source .venv/bin/activate
 python scripts/serve.py
-# 기본: http://127.0.0.1:8765/ (Cloudflare Tunnel 등은 localhost로 프록시)
+# 기본: http://127.0.0.1:8765/ — Cloudflare Tunnel은 localhost:8765 로 프록시
 # 집 Wi‑Fi에서 포트 직접 열기: python scripts/serve.py --host 0.0.0.0
 ```
 
-`serve.py`는 `web/catalog.json`을 갱신한 뒤, 페이지·정적 파일·카탈로그에 있는 `data/audio/<id>.m4a`만 제공합니다 (디렉터리 목록 없음, Safari용 HTTP Range 지원).
+- **이야기** 탭: 재생, **다시 만들기**, **전체 다시 만들기**
+- **목소리** 탭: 녹음/업로드, 받아쓰기, 저장
+- 생성은 서버 안 **단일 워커**(MLX 모델 1회 로드, 작업 1개씩, 대기열 최대 2). 새 `.m4a`는 임시 파일에 만든 뒤 `rename`으로 교체해 재생 중 끊김을 줄입니다. 완료 후 카탈로그·오디오 화이트리스트를 **재시작 없이** 갱신합니다.
+- 로그인 없음. IP당 요청 제한·업로드/대기열 상한 (`CF-Connecting-IP` 지원). 공개 URL은 운영자 선택입니다.
+
+Linux/CI에서 HTTP·대기열·ffmpeg만 검증:
+
+```bash
+python scripts/test_generation_flow.py   # STORY_VOICE_GENERATOR=fake
+```
+
+### 6. Mac mini 배포 (launchd + Tunnel)
+
+저장소 경로 `~/story-voice`, 에이전트 예: `app.baem.story-voice` (ProgramArguments는 `.venv`의 Python으로 `scripts/serve.py`).
+
+```bash
+cd ~/story-voice
+git pull
+source .venv/bin/activate
+uv pip install -r requirements-mlx.txt
+# launchd 재시작 (사용 중인 방법에 맞게)
+launchctl kickstart -k gui/$(id -u)/app.baem.story-voice
+```
+
+Tunnel은 `http://127.0.0.1:8765` 를 `https://story-voice.baem.app` 등으로 노출합니다. `serve.py`는 기본 `127.0.0.1`에만 바인드합니다.
+
+`serve.py`는 `web/catalog.json`을 갱신한 뒤, 페이지·API·카탈로그에 있는 `data/audio/<id>.m4a`만 제공합니다 (디렉터리 목록 없음, Safari용 HTTP Range).
 
 ## 프로젝트 구조
 
@@ -96,8 +127,11 @@ python scripts/serve.py
 | `scripts/clone_story.py` | 한 편 TTS (~120자 청크, mlx-audio `generate`, ffmpeg concat) |
 | `scripts/generate_all.py` | 모든 편 일괄 생성 |
 | `scripts/story_catalog.py` | `web/catalog.json` 빌드 |
-| `scripts/serve.py` | 정적 웹 + 오디오 서빙 |
-| `web/` | 다크 테마 재생 UI (한국어) |
+| `scripts/serve.py` | 웹 UI, 목소리 API, 생성 대기열, 오디오 서빙 |
+| `scripts/voice_service.py` | 참조 음성 저장·백업·ffmpeg 변환 |
+| `scripts/generation_service.py` | 단일 워커 생성 큐 |
+| `content/record_script.txt` | 웹에 표시되는 녹음 대본 |
+| `web/` | 다크 테마 UI (한국어) |
 
 ## 검증 (완료)
 

@@ -1,6 +1,7 @@
 # Local voice data (never commit recordings)
 data/voice/*
 !data/voice/README.md
+data/voice/history/
 data/recordings/
 recordings/
 
