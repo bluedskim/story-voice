@@ -18,7 +18,7 @@ from urllib.parse import unquote, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from generation_service import GenerationService
+from generation_service import EnqueueResult, GenerationService, JobState, StoryNotFoundError
 from http_utils import client_ip, parse_multipart, read_json_body, send_json
 from rate_limit import RateLimiter
 from story_catalog import write_manifest
@@ -163,8 +163,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요."})
                 return
             try:
-                job = self.app.generation.enqueue_story(story_id)
-                send_json(self, HTTPStatus.ACCEPTED, {"job": job.to_public()})
+                result = self.app.generation.enqueue_story(story_id)
+                self._send_enqueue_result(result)
+            except StoryNotFoundError:
+                send_json(self, HTTPStatus.NOT_FOUND, {"error": "이야기를 찾을 수 없어요."})
             except RuntimeError as exc:
                 send_json(self, HTTPStatus.CONFLICT, {"error": str(exc)})
             return
@@ -174,8 +176,8 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요."})
                 return
             try:
-                job = self.app.generation.enqueue_all()
-                send_json(self, HTTPStatus.ACCEPTED, {"job": job.to_public()})
+                result = self.app.generation.enqueue_all()
+                self._send_enqueue_result(result)
             except RuntimeError as exc:
                 send_json(self, HTTPStatus.CONFLICT, {"error": str(exc)})
             return
@@ -203,6 +205,17 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
         finally:
             tmp_path.unlink(missing_ok=True)
+
+    def _send_enqueue_result(self, result: EnqueueResult) -> None:
+        job = result.job
+        payload = {"job": job.to_public(), "deduplicated": not result.created}
+        if result.created:
+            send_json(self, HTTPStatus.ACCEPTED, payload)
+            return
+        if job.state in {JobState.QUEUED, JobState.RUNNING}:
+            send_json(self, HTTPStatus.ACCEPTED, payload)
+        else:
+            send_json(self, HTTPStatus.OK, payload)
 
     def _serve_audio(self, route: str) -> None:
         name = route[len("/audio/") :]

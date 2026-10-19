@@ -61,6 +61,22 @@ def make_upload_wav(path: Path, duration: float = 8.0) -> None:
     )
 
 
+def multipart_upload(transcript: str, file_bytes: bytes, filename: str, content_type: str) -> bytes:
+    boundary = "----storyvoice"
+    parts = [
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="transcript"\r\n\r\n'
+        f"{transcript}\r\n",
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="audio"; filename="{filename}"\r\n'
+        f"Content-Type: {content_type}\r\n\r\n".encode()
+        + file_bytes
+        + b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    return b"".join([p if isinstance(p, bytes) else p.encode() for p in parts])
+
+
 def multipart_voice(wav_path: Path, transcript: str) -> bytes:
     boundary = "----storyvoice"
     audio = wav_path.read_bytes()
@@ -90,11 +106,38 @@ def main() -> int:
     try:
         wait_server()
 
+        from http_utils import parse_multipart_body
+
+        script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
+        parsed = parse_multipart_body(
+            multipart_upload(script, b"hello", "x.txt", "text/plain"),
+            "multipart/form-data; boundary=----storyvoice",
+        )
+        assert parsed and parsed.get("transcript") == script
+
+        try:
+            http(
+                "POST",
+                "/api/voice",
+                data=multipart_upload(script, b"not audio", "x.txt", "text/plain"),
+                headers={"Content-Type": "multipart/form-data; boundary=----storyvoice"},
+            )
+            raise AssertionError("expected 400 for non-audio")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            err = json.loads(exc.read().decode())
+            assert err.get("code") == "invalid_audio"
+
+        try:
+            http("POST", "/api/generation/story/does-not-exist")
+            raise AssertionError("expected 404")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
+
         # Voice upload
         with tempfile.TemporaryDirectory() as tmp:
             wav = Path(tmp) / "voice.wav"
             make_upload_wav(wav, 8.0)
-            script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
             body = multipart_voice(wav, script)
             res = http(
                 "POST",
@@ -110,6 +153,13 @@ def main() -> int:
         # Enqueue one story
         res = http("POST", "/api/generation/story/ui-joeun-hyeongje")
         assert res.status == 202
+        first = json.loads(res.read().decode())
+        job_id = first["job"]["jobId"]
+
+        res2 = http("POST", "/api/generation/story/ui-joeun-hyeongje")
+        dup = json.loads(res2.read().decode())
+        assert dup.get("deduplicated") is True
+        assert dup["job"]["jobId"] == job_id
 
         deadline = time.time() + 60
         while time.time() < deadline:
@@ -140,7 +190,10 @@ def main() -> int:
         except urllib.error.HTTPError as exc:
             assert exc.code == 404
 
-        print("OK: voice upload, fake generation, atomic replace, range, no listing")
+        print(
+            "OK: multipart parser, bad upload 400, unknown story 404, dedupe, "
+            "voice upload, fake generation, atomic replace, range, no listing"
+        )
         return 0
     finally:
         proc.terminate()

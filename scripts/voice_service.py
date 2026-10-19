@@ -35,45 +35,58 @@ def default_record_script() -> str:
 
 
 def probe_duration_sec(path: Path) -> float:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    data = json.loads(result.stdout)
-    return float(data["format"]["duration"])
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(result.stdout)
+        return float(data["format"]["duration"])
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, ValueError):
+        raise VoiceSaveError(
+            "오디오 길이를 확인할 수 없어요. 다른 파일로 다시 시도해 주세요.",
+            "invalid_audio",
+        )
 
 
 def convert_to_reference_wav(source: Path, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-loglevel",
-            "error",
-            "-i",
-            str(source),
-            "-ar",
-            "24000",
-            "-ac",
-            "1",
-            "-c:a",
-            "pcm_s16le",
-            str(dest),
-        ],
-        check=True,
-    )
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                str(source),
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                "-c:a",
+                "pcm_s16le",
+                str(dest),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        raise VoiceSaveError(
+            "오디오 파일을 읽을 수 없어요. 녹음 파일이나 m4a·wav 형식을 올려 주세요.",
+            "invalid_audio",
+        )
 
 
 def backup_current_reference() -> Path | None:

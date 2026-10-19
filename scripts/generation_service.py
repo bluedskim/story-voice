@@ -24,6 +24,12 @@ MANIFEST_PATH = ROOT / "web" / "catalog.json"
 MAX_QUEUE_LEN = 2  # pending jobs besides the running one
 
 
+class StoryNotFoundError(Exception):
+    def __init__(self, story_id: str) -> None:
+        self.story_id = story_id
+        super().__init__(f"unknown story: {story_id}")
+
+
 class JobState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -55,6 +61,12 @@ class GenerationJob:
         }
 
 
+@dataclass
+class EnqueueResult:
+    job: GenerationJob
+    created: bool
+
+
 class GenerationService:
     def __init__(
         self,
@@ -70,16 +82,59 @@ class GenerationService:
         self._worker = threading.Thread(target=self._run_worker, name="generation-worker", daemon=True)
         self._worker.start()
 
+    @staticmethod
+    def catalog_ids() -> set[str]:
+        return {s.id for s in list_stories()}
+
     def _get_job(self, job_id: str) -> GenerationJob | None:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def enqueue_story(self, story_id: str) -> GenerationJob:
-        return self._enqueue([story_id])
+    def _active_story_ids(self) -> set[str]:
+        with self._lock:
+            active: set[str] = set()
+            for jid in self._order:
+                job = self._jobs.get(jid)
+                if not job or job.state not in {JobState.QUEUED, JobState.RUNNING}:
+                    continue
+                active.update(job.story_ids)
+            return active
 
-    def enqueue_all(self) -> GenerationJob:
-        ids = [s.id for s in list_stories()]
-        return self._enqueue(ids)
+    def _find_active_job_for_story(self, story_id: str) -> GenerationJob | None:
+        with self._lock:
+            for jid in reversed(self._order):
+                job = self._jobs.get(jid)
+                if not job or job.state not in {JobState.QUEUED, JobState.RUNNING}:
+                    continue
+                if story_id in job.story_ids:
+                    return job
+        return None
+
+    def _find_any_active_job(self) -> GenerationJob | None:
+        with self._lock:
+            for jid in reversed(self._order):
+                job = self._jobs.get(jid)
+                if job and job.state in {JobState.QUEUED, JobState.RUNNING}:
+                    return job
+        return None
+
+    def enqueue_story(self, story_id: str) -> EnqueueResult:
+        if story_id not in self.catalog_ids():
+            raise StoryNotFoundError(story_id)
+        existing = self._find_active_job_for_story(story_id)
+        if existing:
+            return EnqueueResult(job=existing, created=False)
+        return EnqueueResult(job=self._enqueue([story_id]), created=True)
+
+    def enqueue_all(self) -> EnqueueResult:
+        active = self._active_story_ids()
+        ids = [s.id for s in list_stories() if s.id not in active]
+        if not ids:
+            existing = self._find_any_active_job()
+            if existing:
+                return EnqueueResult(job=existing, created=False)
+            raise RuntimeError("생성할 이야기가 없어요.")
+        return EnqueueResult(job=self._enqueue(ids), created=True)
 
     def _enqueue(self, story_ids: list[str]) -> GenerationJob:
         if not story_ids:
@@ -151,6 +206,8 @@ class GenerationService:
                 raise RuntimeError("목소리 샘플이 없어요. 먼저 목소리를 저장해 주세요.")
 
             for story_id in job.story_ids:
+                if story_id not in self.catalog_ids():
+                    raise RuntimeError(f"이야기를 찾을 수 없어요: {story_id}")
                 story_path = ROOT / "content" / "stories" / f"{story_id}.txt"
                 if not story_path.is_file():
                     raise RuntimeError(f"이야기를 찾을 수 없어요: {story_id}")
