@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
-# Generate one story with the parent's cloned voice (Mac mini + MLX).
+# Validated usage:
+#   scripts/clone_story.sh <ref.wav> <ref_transcript(.txt or string)> <story.txt> [out.wav]
+# Catalog shortcut (defaults under data/voice/ and data/audio/):
+#   scripts/clone_story.sh content/stories/ui-joeun-hyeongje.txt
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
-
-if [[ ! -d .venv ]]; then
-  echo "Create a venv first: uv venv --python 3.12 && source .venv/bin/activate" >&2
+if [[ ! -x .venv/bin/python ]]; then
+  echo "Create venv first: uv venv --python 3.12 && uv pip install -r requirements-mlx.txt" >&2
   exit 1
 fi
 
-# shellcheck disable=SC1091
-source .venv/bin/activate
+if [[ $# -ge 3 ]]; then
+  REF="$1"
+  REFTXT="$2"
+  STORY="$3"
+  OUT="${4:-out/story_$(date +%Y%m%d_%H%M%S).wav}"
+  shift $(( $# >= 4 ? 4 : 3 ))
+  exec .venv/bin/python scripts/clone_story.py --ref-audio "$REF" --ref-text "$REFTXT" --story "$STORY" --out "$OUT" "$@"
+fi
 
-STORY="${1:-content/stories/ui-joeun-hyeongje.txt}"
-shift || true
+if [[ $# -eq 1 ]]; then
+  exec .venv/bin/python scripts/clone_story.py "$1" "${@:2}"
+fi
 
-exec python scripts/clone_story.py "$STORY" "$@"
+echo "Usage:" >&2
+echo "  $0 <ref.wav> <ref.txt> <story.txt> [out.wav]" >&2
+echo "  $0 content/stories/<id>.txt" >&2
+exit 1

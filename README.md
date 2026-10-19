@@ -46,12 +46,18 @@ ffmpeg -i ~/Downloads/parent_sample.m4a -ar 24000 -ac 1 data/voice/reference.wav
 
 ### 4. 오디오 생성 (MLX)
 
-한 편:
+한 편 (검증된 CLI — wav 출력):
 
 ```bash
 source .venv/bin/activate
-chmod +x scripts/clone_story.sh
-./scripts/clone_story.sh content/stories/ui-joeun-hyeongje.txt
+scripts/clone_story.sh data/voice/reference.wav data/voice/reference.txt \
+  content/stories/ui-joeun-hyeongje.txt out/story.wav
+```
+
+카탈로그 단축 (기본 출력 `data/audio/<id>.m4a`):
+
+```bash
+scripts/clone_story.sh content/stories/ui-joeun-hyeongje.txt
 ```
 
 전체 (모델은 한 번만 로드):
@@ -60,12 +66,11 @@ chmod +x scripts/clone_story.sh
 python scripts/generate_all.py
 ```
 
-문장·문단 쉼 (초):
+쉼·청크 (검증 기본: `--max-chars 120`, `--pause 0.35`):
 
 ```bash
 python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
-  --sentence-pause 0.35 \
-  --paragraph-pause 0.75
+  --sentence-pause 0.35 --paragraph-pause 0.75 --max-chars 120
 ```
 
 생성 파일: `data/audio/<id>.m4a` (역시 git 제외).
@@ -88,7 +93,7 @@ python scripts/serve.py
 | `content/recording_guide.md` | 목소리 녹음 가이드 |
 | `data/voice/` | `reference.wav`, `reference.txt` (로컬만) |
 | `data/audio/` | 생성된 `.m4a` (로컬만) |
-| `scripts/clone_story.py` | 한 편 TTS (문장 단위 + ffmpeg 이어붙이기) |
+| `scripts/clone_story.py` | 한 편 TTS (~120자 청크, mlx-audio `generate`, ffmpeg concat) |
 | `scripts/generate_all.py` | 모든 편 일괄 생성 |
 | `scripts/story_catalog.py` | `web/catalog.json` 빌드 |
 | `scripts/serve.py` | 정적 웹 + 오디오 서빙 |

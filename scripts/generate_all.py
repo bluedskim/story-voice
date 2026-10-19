@@ -20,6 +20,9 @@ def main() -> None:
     parser.add_argument("--model", default=None, help="Override mlx-community model id")
     parser.add_argument("--sentence-pause", type=float, default=None)
     parser.add_argument("--paragraph-pause", type=float, default=None)
+    parser.add_argument("--pause", type=float, default=None, help="Set both pauses (validated --pause)")
+    parser.add_argument("--max-chars", type=int, default=None)
+    parser.add_argument("--temperature", type=float, default=None)
     args = parser.parse_args()
 
     stories = list_stories()
@@ -33,6 +36,13 @@ def main() -> None:
         kwargs["sentence_pause"] = args.sentence_pause
     if args.paragraph_pause is not None:
         kwargs["paragraph_pause"] = args.paragraph_pause
+    if args.pause is not None:
+        kwargs["sentence_pause"] = args.pause
+        kwargs["paragraph_pause"] = args.pause
+    if args.max_chars is not None:
+        kwargs["max_chars"] = args.max_chars
+    if args.temperature is not None:
+        kwargs["temperature"] = args.temperature
 
     generator = StoryGenerator(**kwargs)
 
