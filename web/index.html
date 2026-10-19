@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1419" />
+    <title>잠자리 이야기</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <p class="eyebrow">story-voice</p>
+        <h1>잠자리 이야기</h1>
+        <p class="subtitle">엄마·아빠 목소리로 듣는 동화</p>
+      </header>
+
+      <main id="story-list" class="story-list" aria-live="polite"></main>
+
+      <footer class="footer">
+        <p>이 기기에서만 재생돼요. 목소리 파일은 밖으로 나가지 않아요.</p>
+      </footer>
+    </div>
+
+    <audio id="player" preload="metadata"></audio>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

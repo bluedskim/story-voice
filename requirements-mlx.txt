@@ -1,0 +1,2 @@
+# Mac mini (Apple Silicon) — install inside uv venv with Python 3.12
+mlx-audio==0.6.0
