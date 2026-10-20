@@ -66,9 +66,9 @@ class FakeGenerationBackend(GenerationBackend):
         output_path: Path,
         on_progress: ProgressCallback,
     ) -> None:
-        from clone_story import split_sentences, DEFAULT_MAX_CHARS
+        from story_chunking import split_story_into_chunks
 
-        chunks = split_sentences(story_text, DEFAULT_MAX_CHARS)
+        chunks = split_story_into_chunks(story_text)
         total = max(len(chunks), 1)
         for i in range(total):
             on_progress(i + 1, total, story_id)
@@ -100,9 +100,9 @@ class MLXGenerationBackend(GenerationBackend):
         output_path: Path,
         on_progress: ProgressCallback,
     ) -> None:
-        from clone_story import split_sentences, DEFAULT_MAX_CHARS
+        from story_chunking import split_story_into_chunks
 
-        total = len(split_sentences(story_text, DEFAULT_MAX_CHARS)) or 1
+        total = len(split_story_into_chunks(story_text)) or 1
 
         def on_chunk(current: int, _total: int) -> None:
             on_progress(current, total, story_id)

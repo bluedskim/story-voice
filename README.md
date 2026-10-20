@@ -50,12 +50,16 @@ ffmpeg -i ~/Downloads/parent_sample.m4a -ar 24000 -ac 1 data/voice/reference.wav
 
 ### 4. 오디오 생성 (MLX)
 
-한 편 (검증된 CLI — wav 출력):
+한 편 — **문장 단위 청크**, 청크별 무음 트림, concat 후 **-16 LUFS** loudnorm → `m4a`. 기본 쉼: 문장 **0.35s**, 문단 **0.75s** (`scripts/audio_quality_config.py`). 인용 대화는 앞뒤로 **+0.12s** 추가.
+
+**ASR 검증 (기본 켜짐):** 전체 TTS를 먼저 만든 뒤 TTS 모델을 내리고 `Qwen3-ASR-0.6B-8bit`로 청크별 CER을 계산합니다. CER **> 0.18**인 청크만 최대 **2**번까지 다시 생성합니다 (16GB Mac에서는 TTS·ASR를 동시에 올리지 않음). 끄기: `--no-asr-verify` 또는 `STORY_VOICE_ASR_VERIFY=0`.
+
+Mac mini에서 한 편 생성 + **타이밍·CER 로그** (stderr):
 
 ```bash
-source .venv/bin/activate
-scripts/clone_story.sh data/voice/reference.wav data/voice/reference.txt \
-  content/stories/ui-joeun-hyeongje.txt out/story.wav
+cd ~/story-voice && source .venv/bin/activate
+STORY_VOICE_ASR_VERIFY=1 python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt
+# 조정: --cer-threshold 0.18 --max-asr-retries 2 --sentence-pause 0.35 --paragraph-pause 0.75
 ```
 
 카탈로그 단축 (기본 출력 `data/audio/<id>.m4a`):
@@ -68,13 +72,6 @@ scripts/clone_story.sh content/stories/ui-joeun-hyeongje.txt
 
 ```bash
 python scripts/generate_all.py
-```
-
-쉼·청크 (검증 기본: `--max-chars 120`, `--pause 0.35`):
-
-```bash
-python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
-  --sentence-pause 0.35 --paragraph-pause 0.75 --max-chars 120
 ```
 
 생성 파일: `data/audio/<id>.m4a` (역시 git 제외).
@@ -93,10 +90,11 @@ python scripts/serve.py
 - 생성은 서버 안 **단일 워커**(MLX 모델 1회 로드, 작업 1개씩, 대기열 최대 2). 새 `.m4a`는 임시 파일에 만든 뒤 `rename`으로 교체해 재생 중 끊김을 줄입니다. 완료 후 카탈로그·오디오 화이트리스트를 **재시작 없이** 갱신합니다.
 - 로그인 없음. IP당 요청 제한·업로드/대기열 상한 (`CF-Connecting-IP` 지원). 공개 URL은 운영자 선택입니다.
 
-Linux/CI에서 HTTP·대기열·ffmpeg만 검증:
+Linux/CI에서 HTTP·대기열·ffmpeg·청크/CER/후처리만 검증:
 
 ```bash
-python scripts/test_generation_flow.py   # STORY_VOICE_GENERATOR=fake
+STORY_VOICE_GENERATOR=fake STORY_VOICE_ASR_VERIFY=0 python scripts/test_generation_flow.py
+python scripts/test_audio_quality.py
 ```
 
 ### 6. Mac mini 배포 (launchd + Tunnel)
@@ -124,7 +122,9 @@ Tunnel은 `http://127.0.0.1:8765` 를 `https://story-voice.baem.app` 등으로 �
 | `content/recording_guide.md` | 목소리 녹음 가이드 |
 | `data/voice/` | `reference.wav`, `reference.txt` (로컬만) |
 | `data/audio/` | 생성된 `.m4a` (로컬만) |
-| `scripts/clone_story.py` | 한 편 TTS (~120자 청크, mlx-audio `generate`, ffmpeg concat) |
+| `scripts/clone_story.py` | 한 편 TTS (`narration_pipeline`: 문장 청크, ASR 검증, loudnorm m4a) |
+| `scripts/story_chunking.py` | 문장·대화 청크 분할 |
+| `scripts/narration_pipeline.py` | TTS → (ASR) → concat → loudnorm |
 | `scripts/generate_all.py` | 모든 편 일괄 생성 |
 | `scripts/story_catalog.py` | `web/catalog.json` 빌드 |
 | `scripts/serve.py` | 웹 UI, 목소리 API, 생성 대기열, 오디오 서빙 |
