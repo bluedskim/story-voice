@@ -9,12 +9,12 @@ from audio_quality_config import (
     DIALOGUE_PAUSE_EXTRA,
     LONG_SENTENCE_COMMA_SPLIT_CHARS,
     MIN_SENTENCE_MERGE_CHARS,
+    TARGET_CHUNK_MAX_CHARS,
+    TARGET_CHUNK_MIN_CHARS,
 )
 
 SENTENCE_END_RE = re.compile(r"(?<=[.!?。！？…])\s+")
-QUOTE_CHARS = "\"“”‘’「」『』"
 DIALOGUE_MARK_RE = re.compile(r'["“”‘’「」『』]')
-# Paired quotes; non-greedy inner match for dialogue spans.
 DIALOGUE_SPAN_RE = re.compile(
     r'(["“”])(.+?)(["“”])|([「『])(.+?)([」』])'
 )
@@ -28,8 +28,6 @@ class StoryChunk:
 
     @property
     def pause_before_sec(self) -> float:
-        from audio_quality_config import DEFAULT_SENTENCE_PAUSE
-
         return DIALOGUE_PAUSE_EXTRA if self.dialogue else 0.0
 
     def pause_after_sec(self, sentence_pause: float, paragraph_pause: float) -> float:
@@ -37,6 +35,13 @@ class StoryChunk:
         if self.dialogue:
             base += DIALOGUE_PAUSE_EXTRA
         return base
+
+
+@dataclass(frozen=True)
+class _Segment:
+    text: str
+    dialogue: bool
+    pause_after: str
 
 
 def _is_dialogue(text: str) -> bool:
@@ -107,15 +112,61 @@ def _merge_short(sentences: list[str], min_chars: int) -> list[str]:
     return merged
 
 
+def _pack_segments(
+    segments: list[_Segment],
+    min_chars: int,
+    max_chars: int,
+) -> list[StoryChunk]:
+    """Pack narration segments up to max_chars; dialogue always standalone."""
+    chunks: list[StoryChunk] = []
+    buf: list[_Segment] = []
+
+    def packed_len(parts: list[_Segment]) -> int:
+        return len(" ".join(p.text for p in parts))
+
+    def flush() -> None:
+        nonlocal buf
+        if not buf:
+            return
+        text = " ".join(p.text for p in buf)
+        chunks.append(
+            StoryChunk(
+                text=text,
+                pause_after=buf[-1].pause_after,
+                dialogue=any(p.dialogue for p in buf),
+            )
+        )
+        buf = []
+
+    for seg in segments:
+        if seg.dialogue:
+            flush()
+            chunks.append(StoryChunk(text=seg.text, pause_after=seg.pause_after, dialogue=True))
+            continue
+        if buf and (
+            packed_len(buf) + 1 + len(seg.text) > max_chars or buf[-1].pause_after == "paragraph"
+        ):
+            flush()
+        buf.append(seg)
+        if packed_len(buf) >= min_chars or seg.pause_after == "paragraph":
+            flush()
+    flush()
+    return chunks
+
+
 def split_story_into_chunks(
     text: str,
     long_sentence_chars: int = LONG_SENTENCE_COMMA_SPLIT_CHARS,
     min_merge_chars: int = MIN_SENTENCE_MERGE_CHARS,
+    target_min_chars: int = TARGET_CHUNK_MIN_CHARS,
+    target_max_chars: int = TARGET_CHUNK_MAX_CHARS,
 ) -> list[StoryChunk]:
     text = re.sub(r"[ \t]+", " ", text.strip())
-    chunks: list[StoryChunk] = []
+    if not text:
+        return []
+    segments: list[_Segment] = []
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
-    for pi, para in enumerate(paragraphs):
+    for para in paragraphs:
         raw_sents = [s.strip() for s in SENTENCE_END_RE.split(para) if s.strip()]
         expanded: list[str] = []
         for s in raw_sents:
@@ -124,12 +175,16 @@ def split_story_into_chunks(
         merged = _merge_short(expanded, min_merge_chars)
         for ci, sent in enumerate(merged):
             pause_after = "paragraph" if ci == len(merged) - 1 else "sentence"
-            chunks.append(StoryChunk(text=sent, pause_after=pause_after, dialogue=_is_dialogue(sent)))
-    return chunks
+            segments.append(
+                _Segment(
+                    text=sent,
+                    dialogue=_is_dialogue(sent),
+                    pause_after=pause_after,
+                )
+            )
+    return _pack_segments(segments, target_min_chars, target_max_chars)
 
 
-# Backward-compatible alias used by older imports/tests
 def split_sentences(text: str, max_chars: int = 120) -> list[tuple[str, str]]:
     """Legacy API: returns (text, pause_kind) tuples."""
-    del max_chars  # sentence-based; max_chars ignored
-    return [(c.text, c.pause_after) for c in split_story_into_chunks(text)]
+    return [(c.text, c.pause_after) for c in split_story_into_chunks(text, target_max_chars=max_chars)]

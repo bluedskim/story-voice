@@ -40,14 +40,11 @@ def load_ref_text(ref_text: str | Path) -> str:
     return str(ref_text).strip()
 
 
-def read_story_text(story_path: Path, catalog_mode: bool) -> str:
-    raw = story_path.read_text(encoding="utf-8")
-    if not catalog_mode:
-        return raw
+def read_story_text(story_path: Path) -> str:
     sys.path.insert(0, str(ROOT / "scripts"))
-    from story_catalog import load_story
+    from story_text import narration_text_from_path
 
-    return load_story(story_path).body
+    return narration_text_from_path(story_path)
 
 
 def ffmpeg_concat_to_out(list_path: str, sr: int, out_path: Path) -> None:
@@ -116,7 +113,10 @@ class StoryGenerator:
         if self._model is None:
             from mlx_audio.tts.utils import load_model
 
+            t0 = time.time()
+            print(f"Reloading TTS model {self.model_id}…", file=sys.stderr)
             self._model = load_model(self.model_id)
+            print(f"TTS reloaded in {time.time() - t0:.1f}s", file=sys.stderr)
         return self._model
 
     def _unload_model(self) -> None:
@@ -204,13 +204,13 @@ def main() -> None:
 
     if legacy:
         story_path = a.story
-        story_text = read_story_text(story_path, catalog_mode=False)
+        story_text = read_story_text(story_path)
         ref_audio = a.ref_audio
         ref_text = load_ref_text(a.ref_text)
         out = a.out or a.output
     elif catalog:
         story_path = a.catalog_story
-        story_text = read_story_text(story_path, catalog_mode=True)
+        story_text = read_story_text(story_path)
         ref_audio = a.ref_audio or DEFAULT_REF_WAV
         ref_text = load_ref_text(a.ref_text or DEFAULT_REF_TEXT)
         from story_catalog import load_story

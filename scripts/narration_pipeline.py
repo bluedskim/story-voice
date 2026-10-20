@@ -27,10 +27,27 @@ from asr_verify import (
     release_mlx_memory,
     score_chunk,
     should_retry,
+    should_skip_mass_retry,
 )
 from story_chunking import StoryChunk, split_story_into_chunks
 
 ChunkProgress = Callable[[int, int], None]
+
+
+@dataclass
+class VoiceReference:
+    """Cached reference waveform so TTS does not reload/re-encode ref audio every chunk."""
+
+    path: Path
+    text: str
+    _wave: object | None = field(default=None, repr=False)
+
+    def audio_array(self) -> object:
+        if self._wave is None:
+            from mlx_audio.utils import load_audio
+
+            self._wave = load_audio(str(self.path), sample_rate=24000)
+        return self._wave
 
 
 @dataclass
@@ -55,15 +72,18 @@ class StoryTiming:
 def _generate_tts_audio(
     model,
     text: str,
-    ref_audio: str | Path,
-    ref_text: str,
+    voice_ref: VoiceReference,
     lang: str,
     temperature: float | None,
 ) -> tuple[object, int]:
     import numpy as np
 
-    ref_audio_str = os.fspath(ref_audio)
-    kw: dict = dict(text=text, ref_audio=ref_audio_str, ref_text=ref_text, lang_code=lang)
+    kw: dict = dict(
+        text=text,
+        ref_audio=voice_ref.audio_array(),
+        ref_text=voice_ref.text,
+        lang_code=lang,
+    )
     if temperature is not None:
         kw["temperature"] = temperature
     try:
@@ -120,7 +140,9 @@ class TtsSession:
     @property
     def model(self):
         if self._model is None:
+            t0 = time.time()
             self._model = self._loader()
+            print(f"TTS model ready in {time.time() - t0:.1f}s", file=sys.stderr)
         return self._model
 
     def release(self) -> None:
@@ -133,8 +155,7 @@ class TtsSession:
 def _synthesize_chunk(
     tts_session: TtsSession,
     chunk: StoryChunk,
-    ref_audio: Path,
-    ref_text: str,
+    voice_ref: VoiceReference,
     cfg: NarrationConfig,
     raw_path: Path,
     trimmed_path: Path,
@@ -142,14 +163,12 @@ def _synthesize_chunk(
     audio, sr = _generate_tts_audio(
         tts_session.model,
         chunk.text,
-        ref_audio,
-        ref_text,
+        voice_ref,
         "Korean",
         cfg.temperature,
     )
     _write_chunk_wav(audio, sr, raw_path)
     run_ffmpeg(ffmpeg_trim_chunk(raw_path, trimmed_path))
-    release_mlx_memory()
     return sr
 
 
@@ -157,8 +176,7 @@ def _run_asr_verification(
     chunks: list[StoryChunk],
     chunk_paths: list[Path],
     tts_session: TtsSession,
-    ref_audio: Path,
-    ref_text: str,
+    voice_ref: VoiceReference,
     cfg: NarrationConfig,
     tmpdir: Path,
 ) -> tuple[list[Path], VerifyStats, float, int]:
@@ -178,6 +196,18 @@ def _run_asr_verification(
         stats.chunk_results.append(ChunkVerifyResult(index=i, cer=cer, attempts=1, hypothesis=hyp))
         print(f"  ASR chunk {i + 1}/{len(chunks)} CER={cer:.3f}", file=sys.stderr)
 
+    fail_count = sum(1 for cer in best_cer if cer > cfg.cer_threshold)
+    if should_skip_mass_retry(fail_count, len(chunks)):
+        stats.mass_retry_skipped = True
+        print(
+            f"WARN: {fail_count}/{len(chunks)} chunks above CER {cfg.cer_threshold} — "
+            "skipping retries (likely systematic ASR/CER issue, not per-chunk audio)",
+            file=sys.stderr,
+        )
+        asr.unload()
+        stats.asr_seconds = time.time() - t_asr
+        return best_paths, stats, stats.asr_seconds, stats.retry_generations
+
     retry_round = 0
     while retry_round < cfg.max_asr_retries:
         indices = [
@@ -191,12 +221,12 @@ def _run_asr_verification(
         print(f"ASR retry round {retry_round}: chunks {indices}", file=sys.stderr)
 
         asr.unload()
-        tts_session.model  # load TTS
+        tts_session.model
         for i in indices:
             chunk = chunks[i]
             raw = tmpdir / f"chunk_{i:04d}_retry{retry_round}_raw.wav"
             trimmed = tmpdir / f"chunk_{i:04d}_retry{retry_round}.wav"
-            _synthesize_chunk(tts_session, chunk, ref_audio, ref_text, cfg, raw, trimmed)
+            _synthesize_chunk(tts_session, chunk, voice_ref, cfg, raw, trimmed)
             stats.retry_generations += 1
 
         tts_session.release()
@@ -287,6 +317,7 @@ def narrate_story(
         raise ValueError("Story text is empty")
     print(f"{len(chunks)} chunks (sentence-based)", file=sys.stderr)
 
+    voice_ref = VoiceReference(path=ref_audio, text=ref_text)
     timing = StoryTiming()
     out_parent = out_path.parent if out_path.parent.exists() else Path.cwd() / "out"
     tmpdir = Path(tempfile.mkdtemp(prefix="story_chunks_", dir=str(out_parent)))
@@ -299,7 +330,7 @@ def narrate_story(
             raw = tmpdir / f"chunk_{i:04d}_raw.wav"
             trimmed = tmpdir / f"chunk_{i:04d}.wav"
             t1 = time.time()
-            sr = _synthesize_chunk(tts_session, chunk, ref_audio, ref_text, cfg, raw, trimmed)
+            sr = _synthesize_chunk(tts_session, chunk, voice_ref, cfg, raw, trimmed)
             chunk_wavs.append(trimmed)
             print(
                 f"[{i + 1}/{len(chunks)}] TTS {time.time() - t1:.1f}s :: {chunk.text[:40]}",
@@ -312,7 +343,7 @@ def narrate_story(
 
         if cfg.verify_asr:
             chunk_wavs, vstats, asr_sec, retries = _run_asr_verification(
-                chunks, chunk_wavs, tts_session, ref_audio, ref_text, cfg, tmpdir
+                chunks, chunk_wavs, tts_session, voice_ref, cfg, tmpdir
             )
             timing.verify_stats = vstats
             timing.asr_seconds = asr_sec

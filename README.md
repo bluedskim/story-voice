@@ -52,7 +52,9 @@ ffmpeg -i ~/Downloads/parent_sample.m4a -ar 24000 -ac 1 data/voice/reference.wav
 
 한 편 — **문장 단위 청크**, 청크별 무음 트림, concat 후 **-16 LUFS** loudnorm → `m4a`. 기본 쉼: 문장 **0.35s**, 문단 **0.75s** (`scripts/audio_quality_config.py`). 인용 대화는 앞뒤로 **+0.12s** 추가.
 
-**ASR 검증 (기본 켜짐):** 전체 TTS를 먼저 만든 뒤 TTS 모델을 내리고 `Qwen3-ASR-0.6B-8bit`로 청크별 CER을 계산합니다. CER **> 0.18**인 청크만 최대 **2**번까지 다시 생성합니다 (16GB Mac에서는 TTS·ASR를 동시에 올리지 않음). 끄기: `--no-asr-verify` 또는 `STORY_VOICE_ASR_VERIFY=0`.
+**청크:** 문장 경계 + 대화는 따로, 일반 문장은 **60–120자**까지 묶음 (문단 경계는 넘지 않음). 참조 음성은 한 번만 로드해 매 청크에 재사용합니다.
+
+**ASR 검증 (기본 켜짐):** 전체 TTS를 먼저 만든 뒤 TTS 모델을 내리고 `Qwen3-ASR-0.6B-8bit`로 청크별 CER을 계산합니다 (`result.text` 사용, repr 비교 금지). CER **> 0.18**인 청크만 최대 **2**번까지 다시 생성합니다. 절반 이상이 한꺼번에 실패하면 경고 후 **전체 재시도는 건너뜁니다** (설정/ASR 오류 신호). 16GB Mac에서는 TTS·ASR를 동시에 올리지 않음. 끄기: `--no-asr-verify` 또는 `STORY_VOICE_ASR_VERIFY=0`. CER 디버그: `STORY_VOICE_ASR_DEBUG=1`.
 
 Mac mini에서 한 편 생성 + **타이밍·CER 로그** (stderr):
 

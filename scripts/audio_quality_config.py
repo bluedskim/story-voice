@@ -10,8 +10,13 @@ DEFAULT_PARAGRAPH_PAUSE = 0.75
 DIALOGUE_PAUSE_EXTRA = 0.12  # added before and after quoted dialogue chunks
 
 # Sentence chunking
-LONG_SENTENCE_COMMA_SPLIT_CHARS = 90
+LONG_SENTENCE_COMMA_SPLIT_CHARS = 120
 MIN_SENTENCE_MERGE_CHARS = 12
+TARGET_CHUNK_MAX_CHARS = 120
+TARGET_CHUNK_MIN_CHARS = 60
+
+# ASR mass-failure guard (systematic mismatch vs per-chunk audio)
+MASS_RETRY_FAIL_FRACTION = 0.5
 
 # ASR verification (Qwen3-ASR-0.6B-8bit)
 DEFAULT_ASR_MODEL = "mlx-community/Qwen3-ASR-0.6B-8bit"
