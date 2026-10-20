@@ -30,9 +30,12 @@
       </section>
 
       <section id="panel-voice" class="panel" hidden>
-        <p class="voice-hint">녹음 대본을 그대로 읽어 주세요. 글과 녹음이 정확히 같아야 목소리가 잘 복제돼요.</p>
-        <label class="field-label" for="transcript">받아쓰기</label>
-        <textarea id="transcript" class="transcript" rows="8" spellcheck="false"></textarea>
+        <p class="voice-hint">
+          1단계: 아래 대본을 읽어 녹음하거나 파일을 올려 주세요. 2단계: 자동 받아쓰기를 확인한 뒤 저장합니다.
+          녹음과 받아쓰기가 같아야 이야기 길이가 정상이에요.
+        </p>
+        <label class="field-label" for="record-script">녹음 대본</label>
+        <textarea id="record-script" class="transcript transcript-readonly" rows="6" readonly spellcheck="false"></textarea>
 
         <div class="voice-controls">
           <button type="button" id="record-btn" class="btn-primary">녹음</button>
@@ -44,8 +47,18 @@
         </div>
 
         <audio id="preview" class="preview-audio" controls playsinline></audio>
+
+        <button type="button" id="prepare-voice" class="btn-secondary btn-wide" disabled>받아쓰기 확인</button>
+
+        <div id="voice-review" class="voice-review" hidden>
+          <p id="voice-meta" class="voice-meta"></p>
+          <p id="voice-match" class="voice-match" aria-live="polite"></p>
+          <label class="field-label" for="transcript">받아쓰기 (수정 가능)</label>
+          <textarea id="transcript" class="transcript" rows="6" spellcheck="false"></textarea>
+          <button type="button" id="save-voice" class="btn-primary btn-wide">이 목소리로 저장</button>
+        </div>
+
         <p id="voice-msg" class="voice-msg"></p>
-        <button type="button" id="save-voice" class="btn-primary btn-wide" disabled>목소리 저장</button>
       </section>
 
       <footer class="footer">

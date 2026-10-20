@@ -32,7 +32,9 @@ class GenerationBackend(ABC):
 class FakeGenerationBackend(GenerationBackend):
     """Fast stub: simulates chunk progress and writes a tiny valid m4a."""
 
-    def __init__(self, chunk_delay: float = 0.02) -> None:
+    def __init__(self, chunk_delay: float | None = None) -> None:
+        if chunk_delay is None:
+            chunk_delay = float(os.environ.get("STORY_VOICE_FAKE_CHUNK_DELAY", "0.02"))
         self.chunk_delay = chunk_delay
         self._ensure_fixture()
 
