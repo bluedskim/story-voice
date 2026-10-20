@@ -12,7 +12,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -95,7 +97,27 @@ def multipart_voice(wav_path: Path, transcript: str) -> bytes:
     return body
 
 
+def test_download_filename_helpers() -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from download_filenames import (
+        content_disposition_attachment,
+        download_basename,
+        sanitize_title_for_filename,
+    )
+
+    kst = datetime(2026, 10, 21, 8, 30, 45, tzinfo=ZoneInfo("Asia/Seoul"))
+    assert sanitize_title_for_filename('의좋은/형제') == "의좋은형제"
+    assert download_basename("의좋은 형제", kst) == "의좋은 형제_20261021-083045.m4a"
+    cd = content_disposition_attachment("의좋은 형제_20261021-083045.m4a", "ui-joeun-hyeongje_20261021-083045.m4a")
+    assert "attachment" in cd
+    assert "filename*=" in cd
+    assert "UTF-8''" in cd
+    assert "%EC%9D%98" in cd  # UTF-8 percent-encoded '의'
+
+
 def main() -> int:
+    test_download_filename_helpers()
+
     os.environ["STORY_VOICE_GENERATOR"] = "fake"
     env = os.environ.copy()
     proc = subprocess.Popen(
@@ -183,6 +205,21 @@ def main() -> int:
         res = http("GET", "/audio/ui-joeun-hyeongje.m4a", headers={"Range": "bytes=0-99"})
         assert res.status == 206, res.status
         assert res.headers.get("Content-Type") == "audio/mp4"
+        assert res.headers.get("Content-Disposition") is None
+
+        res = http("GET", "/audio/ui-joeun-hyeongje.m4a?download=1")
+        assert res.status == 200
+        cd = res.headers.get("Content-Disposition", "")
+        assert "attachment" in cd
+        assert "filename*=" in cd
+        assert "UTF-8''" in cd
+        assert "의좋은" in cd or "%EC%9D%98" in cd
+
+        try:
+            http("GET", "/audio/does-not-exist.m4a?download=1")
+            raise AssertionError("expected 404 for unknown download")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 404
 
         try:
             http("GET", "/audio/")
@@ -191,8 +228,8 @@ def main() -> int:
             assert exc.code == 404
 
         print(
-            "OK: multipart parser, bad upload 400, unknown story 404, dedupe, "
-            "voice upload, fake generation, atomic replace, range, no listing"
+            "OK: download filenames, multipart, bad upload 400, unknown story 404, dedupe, "
+            "voice upload, fake generation, range playback vs download disposition, no listing"
         )
         return 0
     finally:

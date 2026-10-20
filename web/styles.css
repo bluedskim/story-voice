@@ -243,11 +243,18 @@ body {
   cursor: not-allowed;
 }
 
-.regen-btn {
+.story-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
   margin-top: 0.5rem;
+}
+
+.regen-btn {
   font-size: 0.85rem;
   padding: 0.35rem 0.65rem;
   min-height: auto;
+  text-decoration: none;
 }
 
 .gen-status {
