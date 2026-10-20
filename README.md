@@ -31,7 +31,7 @@ uv pip install -r requirements-mlx.txt
 
 녹음 대본: [`content/record_script.txt`](content/record_script.txt). 자세한 팁은 [`content/recording_guide.md`](content/recording_guide.md).
 
-웹 **목소리** 탭에서 브라우저 녹음(iPhone Safari `audio/mp4`) 또는 파일 업로드 → 받아쓰기 확인 → 저장하면 `data/voice/reference.wav`(24kHz mono)와 `reference.txt`가 생깁니다. 이전 참조는 `data/voice/history/`에 타임스탬프 백업(삭제하지 않음). 길이 **5–40초**, 업로드 **8MB** 이하.
+웹 **목소리** 탭: 녹음/업로드 → **받아쓰기 확인**(서버가 Qwen3-ASR로 인식) → 받아쓰기를 고친 뒤 **이 목소리로 저장**. 확인 전에는 기존 목소리가 바뀌지 않습니다. 저장 시 `reference.wav`(24kHz mono)와 **확인한** `reference.txt`가 함께 들어가고, 이전 참조는 `data/voice/history/`에 백업됩니다. 녹음 **5–40초**, 업로드 **8MB** 이하. 받아쓰기 길이는 녹음 시간과 맞아야 합니다(대략 **2–11자/초**). 이야기 **생성 중**에는 받아쓰기 확인이 잠시 거절됩니다(ASR는 별도 프로세스, TTS와 동시에 MLX를 쓰지 않음).
 
 CLI로 직접 넣을 때:
 

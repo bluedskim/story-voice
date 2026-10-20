@@ -3,13 +3,18 @@ const audio = document.getElementById("player");
 const genStatusEl = document.getElementById("gen-status");
 const regenAllBtn = document.getElementById("regen-all");
 
+const recordScriptEl = document.getElementById("record-script");
 const transcriptEl = document.getElementById("transcript");
 const recordBtn = document.getElementById("record-btn");
 const stopBtn = document.getElementById("stop-btn");
 const fileInput = document.getElementById("file-input");
 const previewEl = document.getElementById("preview");
+const prepareVoiceBtn = document.getElementById("prepare-voice");
 const saveVoiceBtn = document.getElementById("save-voice");
 const voiceMsgEl = document.getElementById("voice-msg");
+const voiceReviewEl = document.getElementById("voice-review");
+const voiceMetaEl = document.getElementById("voice-meta");
+const voiceMatchEl = document.getElementById("voice-match");
 
 let catalog = [];
 let activeId = null;
@@ -19,6 +24,7 @@ let pollTimer = null;
 let mediaRecorder = null;
 let recordChunks = [];
 let pendingBlob = null;
+let pendingToken = null;
 
 function icon(playing) {
   return playing ? "⏸" : "▶";
@@ -39,7 +45,7 @@ async function loadConfig() {
   const res = await fetch("/api/config", { cache: "no-store" });
   if (!res.ok) throw new Error("config");
   const data = await res.json();
-  transcriptEl.value = data.recordScript || "";
+  recordScriptEl.value = data.recordScript || "";
 }
 
 async function loadCatalog() {
@@ -262,9 +268,25 @@ function pickRecorderMime() {
   return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
 }
 
+function resetVoiceReview() {
+  pendingToken = null;
+  voiceReviewEl.hidden = true;
+  transcriptEl.value = "";
+  voiceMetaEl.textContent = "";
+  voiceMatchEl.textContent = "";
+}
+
+function onAudioReady() {
+  prepareVoiceBtn.disabled = false;
+  resetVoiceReview();
+  voiceMsgEl.textContent = "미리 듣고 ‘받아쓰기 확인’을 눌러 주세요.";
+  voiceMsgEl.classList.remove("is-error");
+}
+
 async function startRecording() {
   voiceMsgEl.textContent = "";
   voiceMsgEl.classList.remove("is-error");
+  resetVoiceReview();
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const mime = pickRecorderMime();
   recordChunks = [];
@@ -277,8 +299,7 @@ async function startRecording() {
     const type = mediaRecorder.mimeType || "audio/mp4";
     pendingBlob = new Blob(recordChunks, { type });
     previewEl.src = URL.createObjectURL(pendingBlob);
-    saveVoiceBtn.disabled = false;
-    voiceMsgEl.textContent = "미리 듣고 저장해 주세요.";
+    onAudioReady();
   };
   mediaRecorder.start();
   recordBtn.disabled = true;
@@ -298,20 +319,54 @@ function onFileSelected(file) {
   if (!file) return;
   pendingBlob = file;
   previewEl.src = URL.createObjectURL(file);
-  saveVoiceBtn.disabled = false;
-  voiceMsgEl.textContent = `${file.name} — 미리 듣고 저장해 주세요.`;
+  onAudioReady();
+  voiceMsgEl.textContent = `${file.name} — 미리 듣고 ‘받아쓰기 확인’을 눌러 주세요.`;
+}
+
+function voiceFormData() {
+  const form = new FormData();
+  const ext = pendingBlob.type.includes("mp4") ? "recording.m4a" : "recording.webm";
+  form.append("audio", pendingBlob, ext);
+  return form;
+}
+
+async function prepareVoice() {
+  if (!pendingBlob) return;
+  prepareVoiceBtn.disabled = true;
+  voiceMsgEl.textContent = "받아쓰는 중… (잠시만요)";
   voiceMsgEl.classList.remove("is-error");
+  const res = await fetch("/api/voice/prepare", { method: "POST", body: voiceFormData() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    voiceMsgEl.textContent = data.error || "받아쓰기에 실패했어요.";
+    voiceMsgEl.classList.add("is-error");
+    prepareVoiceBtn.disabled = false;
+    return;
+  }
+  pendingToken = data.pendingToken;
+  transcriptEl.value = data.transcript || "";
+  voiceMetaEl.textContent = `녹음 길이: ${data.durationSec}초 · 최대 약 ${data.limits?.maxCharsForDuration ?? "?"}자`;
+  const pct = data.scriptMatchPercent ?? 0;
+  voiceMatchEl.textContent = `대본 일치: 약 ${pct}% (자동 받아쓰기 vs 녹음 대본)`;
+  voiceMatchEl.classList.toggle("is-warn", pct < 70);
+  voiceReviewEl.hidden = false;
+  voiceMsgEl.textContent = "받아쓰기를 확인하고 필요하면 고친 뒤 저장해 주세요.";
+  prepareVoiceBtn.disabled = false;
 }
 
 async function saveVoice() {
-  if (!pendingBlob) return;
+  if (!pendingToken) {
+    voiceMsgEl.textContent = "먼저 ‘받아쓰기 확인’을 해 주세요.";
+    voiceMsgEl.classList.add("is-error");
+    return;
+  }
   saveVoiceBtn.disabled = true;
   voiceMsgEl.textContent = "저장하는 중…";
-  const form = new FormData();
-  form.append("transcript", transcriptEl.value);
-  const ext = pendingBlob.type.includes("mp4") ? "recording.m4a" : "recording.webm";
-  form.append("audio", pendingBlob, ext);
-  const res = await fetch("/api/voice", { method: "POST", body: form });
+  const res = await fetch("/api/voice/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pendingToken, transcript: transcriptEl.value }),
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     voiceMsgEl.textContent = data.error || "저장하지 못했어요.";
@@ -319,9 +374,17 @@ async function saveVoice() {
     saveVoiceBtn.disabled = false;
     return;
   }
-  voiceMsgEl.textContent = `저장했어요 (${data.durationSec}초). 이야기를 다시 만들 수 있어요.`;
+  let msg = `저장했어요 (${data.durationSec}초). 이야기를 다시 만들 수 있어요.`;
+  if (data.editWarning) {
+    msg += ` ${data.editWarning}`;
+  }
+  voiceMsgEl.textContent = msg;
   voiceMsgEl.classList.remove("is-error");
   pendingBlob = null;
+  pendingToken = null;
+  prepareVoiceBtn.disabled = true;
+  saveVoiceBtn.disabled = false;
+  voiceReviewEl.hidden = true;
 }
 
 recordBtn.addEventListener("click", () => {
@@ -332,6 +395,7 @@ recordBtn.addEventListener("click", () => {
 });
 stopBtn.addEventListener("click", stopRecording);
 fileInput.addEventListener("change", () => onFileSelected(fileInput.files?.[0]));
+prepareVoiceBtn.addEventListener("click", prepareVoice);
 saveVoiceBtn.addEventListener("click", saveVoice);
 regenAllBtn.addEventListener("click", enqueueAll);
 

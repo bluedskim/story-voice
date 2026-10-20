@@ -186,6 +186,15 @@ class GenerationService:
         snap = self.status_snapshot()
         return snap["running"] is not None or len(snap["queued"]) >= MAX_QUEUE_LEN
 
+    def is_generating(self) -> bool:
+        """True while TTS worker is actively generating (blocks voice ASR)."""
+        with self._lock:
+            for jid in reversed(self._order):
+                job = self._jobs.get(jid)
+                if job and job.state == JobState.RUNNING:
+                    return True
+        return False
+
     def _run_worker(self) -> None:
         while True:
             try:

@@ -79,6 +79,20 @@ def multipart_upload(transcript: str, file_bytes: bytes, filename: str, content_
     return b"".join([p if isinstance(p, bytes) else p.encode() for p in parts])
 
 
+def multipart_audio_only(wav_path: Path) -> bytes:
+    boundary = "----storyvoice"
+    audio = wav_path.read_bytes()
+    parts = [
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="audio"; filename="test.wav"\r\n'
+        f"Content-Type: audio/wav\r\n\r\n".encode()
+        + audio
+        + b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    return b"".join(parts)
+
+
 def multipart_voice(wav_path: Path, transcript: str) -> bytes:
     boundary = "----storyvoice"
     audio = wav_path.read_bytes()
@@ -120,6 +134,9 @@ def main() -> int:
 
     os.environ["STORY_VOICE_GENERATOR"] = "fake"
     env = os.environ.copy()
+    env["STORY_VOICE_VOICE_ASR"] = "fake"
+    short = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()[:60]
+    env["STORY_VOICE_FAKE_ASR_TEXT"] = short
     proc = subprocess.Popen(
         [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
         cwd=ROOT,
@@ -140,8 +157,8 @@ def main() -> int:
         try:
             http(
                 "POST",
-                "/api/voice",
-                data=multipart_upload(script, b"not audio", "x.txt", "text/plain"),
+                "/api/voice/prepare",
+                data=multipart_upload(script, b"not audio", "x.bin", "application/octet-stream"),
                 headers={"Content-Type": "multipart/form-data; boundary=----storyvoice"},
             )
             raise AssertionError("expected 400 for non-audio")
@@ -156,18 +173,30 @@ def main() -> int:
         except urllib.error.HTTPError as exc:
             assert exc.code == 404
 
-        # Voice upload
+        # Voice prepare + confirm (fake ASR)
         with tempfile.TemporaryDirectory() as tmp:
             wav = Path(tmp) / "voice.wav"
             make_upload_wav(wav, 8.0)
-            body = multipart_voice(wav, script)
+            prep_body = multipart_audio_only(wav)
             res = http(
                 "POST",
-                "/api/voice",
-                data=body,
+                "/api/voice/prepare",
+                data=prep_body,
                 headers={"Content-Type": "multipart/form-data; boundary=----storyvoice"},
             )
-            assert res.status == 200, res.read()
+            assert res.status == 200
+            prep = json.loads(res.read().decode())
+            confirm = json.dumps(
+                {"pendingToken": prep["pendingToken"], "transcript": short},
+                ensure_ascii=False,
+            ).encode()
+            res = http(
+                "POST",
+                "/api/voice/confirm",
+                data=confirm,
+                headers={"Content-Type": "application/json"},
+            )
+            assert res.status == 200
 
         ref = ROOT / "data" / "voice" / "reference.wav"
         assert ref.is_file(), "reference.wav missing"

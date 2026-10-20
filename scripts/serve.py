@@ -32,9 +32,10 @@ from voice_service import (
     MIN_DURATION_SEC,
     MAX_DURATION_SEC,
     VoiceSaveError,
+    confirm_voice_upload,
     default_record_script,
     has_reference,
-    save_reference,
+    prepare_voice_upload,
 )
 
 WEB_DIR = ROOT / "web"
@@ -157,11 +158,26 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         route = unquote(parsed.path)
         ip = client_ip(self)
 
-        if route == "/api/voice":
+        if route == "/api/voice/prepare":
             if not voice_rate.allow(ip):
                 send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해 주세요."})
                 return
-            self._handle_voice_upload()
+            self._handle_voice_prepare()
+            return
+
+        if route == "/api/voice/confirm":
+            if not voice_rate.allow(ip):
+                send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해 주세요."})
+                return
+            self._handle_voice_confirm()
+            return
+
+        if route == "/api/voice":
+            send_json(
+                self,
+                HTTPStatus.GONE,
+                {"error": "목소리 저장은 ‘받아쓰기 확인’ 후 ‘이 목소리로 저장’을 사용해 주세요.", "code": "use_prepare_confirm"},
+            )
             return
 
         if route.startswith("/api/generation/story/"):
@@ -194,12 +210,21 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
 
         self._send_error(HTTPStatus.NOT_FOUND)
 
-    def _handle_voice_upload(self) -> None:
+    def _handle_voice_prepare(self) -> None:
+        if self.app.generation.is_generating():
+            send_json(
+                self,
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "이야기를 만드는 중이에요. 잠시 후 다시 시도해 주세요.",
+                    "code": "generation_busy",
+                },
+            )
+            return
         form = parse_multipart(self, MAX_UPLOAD_BYTES + 4096)
         if form is None or "audio_data" not in form:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": "오디오 파일이 필요해요."})
             return
-        transcript = form.get("transcript") or ""
         audio_data = form["audio_data"]
         if len(audio_data) > MAX_UPLOAD_BYTES:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": "파일이 너무 커요."})
@@ -209,12 +234,31 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             tmp.write(audio_data)
             tmp_path = Path(tmp.name)
         try:
-            result = save_reference(tmp_path, transcript, len(audio_data))
+            result = prepare_voice_upload(tmp_path, len(audio_data))
             send_json(self, HTTPStatus.OK, result)
         except VoiceSaveError as exc:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
         finally:
             tmp_path.unlink(missing_ok=True)
+
+    def _handle_voice_confirm(self) -> None:
+        body = read_json_body(self, max_bytes=256_000)
+        if body is None:
+            send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+            return
+        token = (body.get("pendingToken") or "").strip()
+        transcript = body.get("transcript") or ""
+        if not token:
+            send_json(self, HTTPStatus.BAD_REQUEST, {"error": "확인 코드가 없어요."})
+            return
+        try:
+            result = confirm_voice_upload(token, transcript)
+            send_json(self, HTTPStatus.OK, result)
+        except VoiceSaveError as exc:
+            status = HTTPStatus.BAD_REQUEST
+            if exc.code in {"expired_token", "invalid_token"}:
+                status = HTTPStatus.GONE
+            send_json(self, status, {"error": str(exc), "code": exc.code})
 
     def _send_enqueue_result(self, result: EnqueueResult) -> None:
         job = result.job
