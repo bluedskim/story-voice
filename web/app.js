@@ -1,8 +1,24 @@
 const listEl = document.getElementById("story-list");
 const audio = document.getElementById("player");
+const genStatusEl = document.getElementById("gen-status");
+const regenAllBtn = document.getElementById("regen-all");
+
+const transcriptEl = document.getElementById("transcript");
+const recordBtn = document.getElementById("record-btn");
+const stopBtn = document.getElementById("stop-btn");
+const fileInput = document.getElementById("file-input");
+const previewEl = document.getElementById("preview");
+const saveVoiceBtn = document.getElementById("save-voice");
+const voiceMsgEl = document.getElementById("voice-msg");
 
 let catalog = [];
 let activeId = null;
+let audioCacheBust = Date.now();
+let pollTimer = null;
+
+let mediaRecorder = null;
+let recordChunks = [];
+let pendingBlob = null;
 
 function icon(playing) {
   return playing ? "⏸" : "▶";
@@ -11,6 +27,19 @@ function icon(playing) {
 function setStatus(card, message) {
   const el = card.querySelector(".story-status");
   if (el) el.textContent = message;
+}
+
+function storyAudioUrl(story) {
+  if (!story.audioUrl) return null;
+  const base = story.audioUrl.split("?")[0];
+  return `${base}?v=${audioCacheBust}`;
+}
+
+async function loadConfig() {
+  const res = await fetch("/api/config", { cache: "no-store" });
+  if (!res.ok) throw new Error("config");
+  const data = await res.json();
+  transcriptEl.value = data.recordScript || "";
 }
 
 async function loadCatalog() {
@@ -22,7 +51,7 @@ async function loadCatalog() {
     catalog = data.stories || [];
     render();
   } catch (err) {
-    listEl.innerHTML = `<p class="error">목록을 불러오지 못했어요. 서버를 다시 실행해 주세요.<br><small>${err.message}</small></p>`;
+    listEl.innerHTML = `<p class="error">목록을 불러오지 못했어요.<br><small>${err.message}</small></p>`;
   }
 }
 
@@ -52,6 +81,12 @@ function render() {
     status.className = "story-status";
     status.textContent = story.hasAudio ? "재생할 준비됐어요" : "아직 녹음이 없어요";
 
+    const regen = document.createElement("button");
+    regen.type = "button";
+    regen.className = "btn-secondary regen-btn";
+    regen.textContent = "다시 만들기";
+    regen.addEventListener("click", () => enqueueStory(story.id));
+
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "toggle-text";
@@ -68,14 +103,15 @@ function render() {
 
     btn.addEventListener("click", () => togglePlayback(story, card, btn));
 
-    main.append(title, status, toggle, text);
+    main.append(title, status, regen, toggle, text);
     card.append(btn, main);
     listEl.appendChild(card);
   }
 }
 
 function togglePlayback(story, card, btn) {
-  if (!story.audioUrl) return;
+  const url = storyAudioUrl(story);
+  if (!url) return;
 
   if (activeId === story.id && !audio.paused) {
     audio.pause();
@@ -93,8 +129,9 @@ function togglePlayback(story, card, btn) {
 
   activeId = story.id;
   card.classList.add("is-active");
-  if (audio.src !== new URL(story.audioUrl, location.href).href) {
-    audio.src = story.audioUrl;
+  const nextSrc = new URL(url, location.href).href;
+  if (audio.src !== nextSrc) {
+    audio.src = url;
   }
   audio.play().catch(() => setStatus(card, "재생할 수 없어요"));
   btn.textContent = icon(true);
@@ -118,4 +155,174 @@ audio.addEventListener("pause", () => {
   if (btn && audio.paused) btn.textContent = icon(false);
 });
 
+async function enqueueStory(id) {
+  const res = await fetch(`/api/generation/story/${id}`, { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showGenStatus(data.error || "요청하지 못했어요.", true);
+    return;
+  }
+  showGenStatus("만드는 중…");
+  startPolling();
+}
+
+async function enqueueAll() {
+  const res = await fetch("/api/generation/all", { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showGenStatus(data.error || "요청하지 못했어요.", true);
+    return;
+  }
+  showGenStatus("전체 이야기를 만드는 중…");
+  startPolling();
+}
+
+function showGenStatus(text, isError = false) {
+  genStatusEl.hidden = !text;
+  genStatusEl.textContent = text;
+  genStatusEl.classList.toggle("is-error", isError);
+}
+
+async function pollGeneration() {
+  const res = await fetch("/api/generation/status", { cache: "no-store" });
+  if (!res.ok) return;
+  const data = await res.json();
+  const running = data.running;
+  if (running) {
+    const chunk =
+      running.chunkTotal > 0
+        ? ` (${running.chunkIndex}/${running.chunkTotal}번째)`
+        : "";
+    showGenStatus(
+      `생성 중: ${running.currentStoryId || ""}${chunk}`
+    );
+    return;
+  }
+  if (data.queued?.length) {
+    showGenStatus(`대기 중… (${data.queued.length}개)`);
+    return;
+  }
+  const last = data.recent?.[0];
+  if (last?.state === "failed") {
+    showGenStatus(last.error || "실패했어요.", true);
+    stopPolling();
+    return;
+  }
+  if (last?.state === "done") {
+    audioCacheBust = Date.now();
+    showGenStatus("새 목소리로 만들었어요.");
+    await loadCatalog();
+    stopPolling();
+    setTimeout(() => showGenStatus(""), 4000);
+    return;
+  }
+  stopPolling();
+  showGenStatus("");
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(pollGeneration, 1500);
+  pollGeneration();
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function setupTabs() {
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const name = tab.dataset.tab;
+      document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("is-active", t === tab));
+      document.getElementById("panel-stories").hidden = name !== "stories";
+      document.getElementById("panel-voice").hidden = name !== "voice";
+    });
+  });
+}
+
+function pickRecorderMime() {
+  const types = ["audio/mp4", "audio/aac", "audio/webm;codecs=opus", "audio/webm"];
+  return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+}
+
+async function startRecording() {
+  voiceMsgEl.textContent = "";
+  voiceMsgEl.classList.remove("is-error");
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mime = pickRecorderMime();
+  recordChunks = [];
+  mediaRecorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size) recordChunks.push(e.data);
+  };
+  mediaRecorder.onstop = () => {
+    stream.getTracks().forEach((t) => t.stop());
+    const type = mediaRecorder.mimeType || "audio/mp4";
+    pendingBlob = new Blob(recordChunks, { type });
+    previewEl.src = URL.createObjectURL(pendingBlob);
+    saveVoiceBtn.disabled = false;
+    voiceMsgEl.textContent = "미리 듣고 저장해 주세요.";
+  };
+  mediaRecorder.start();
+  recordBtn.disabled = true;
+  stopBtn.disabled = false;
+  voiceMsgEl.textContent = "녹음 중…";
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+  recordBtn.disabled = false;
+  stopBtn.disabled = true;
+}
+
+function onFileSelected(file) {
+  if (!file) return;
+  pendingBlob = file;
+  previewEl.src = URL.createObjectURL(file);
+  saveVoiceBtn.disabled = false;
+  voiceMsgEl.textContent = `${file.name} — 미리 듣고 저장해 주세요.`;
+  voiceMsgEl.classList.remove("is-error");
+}
+
+async function saveVoice() {
+  if (!pendingBlob) return;
+  saveVoiceBtn.disabled = true;
+  voiceMsgEl.textContent = "저장하는 중…";
+  const form = new FormData();
+  form.append("transcript", transcriptEl.value);
+  const ext = pendingBlob.type.includes("mp4") ? "recording.m4a" : "recording.webm";
+  form.append("audio", pendingBlob, ext);
+  const res = await fetch("/api/voice", { method: "POST", body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    voiceMsgEl.textContent = data.error || "저장하지 못했어요.";
+    voiceMsgEl.classList.add("is-error");
+    saveVoiceBtn.disabled = false;
+    return;
+  }
+  voiceMsgEl.textContent = `저장했어요 (${data.durationSec}초). 이야기를 다시 만들 수 있어요.`;
+  voiceMsgEl.classList.remove("is-error");
+  pendingBlob = null;
+}
+
+recordBtn.addEventListener("click", () => {
+  startRecording().catch(() => {
+    voiceMsgEl.textContent = "마이크를 사용할 수 없어요.";
+    voiceMsgEl.classList.add("is-error");
+  });
+});
+stopBtn.addEventListener("click", stopRecording);
+fileInput.addEventListener("change", () => onFileSelected(fileInput.files?.[0]));
+saveVoiceBtn.addEventListener("click", saveVoice);
+regenAllBtn.addEventListener("click", enqueueAll);
+
+setupTabs();
+loadConfig().catch(() => {});
 loadCatalog();
+pollGeneration();

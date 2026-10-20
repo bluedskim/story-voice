@@ -22,8 +22,11 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
+
+ChunkProgress = Callable[[int, int], None]
 
 DEFAULT_MODEL = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"
 DEFAULT_REF_WAV = ROOT / "data" / "voice" / "reference.wav"
@@ -94,6 +97,7 @@ def generate_chunks_to_wav(
     sentence_pause: float,
     paragraph_pause: float,
     temperature: float | None,
+    on_chunk: ChunkProgress | None = None,
 ) -> tuple[list[str], int]:
     import mlx.core as mx
     import numpy as np
@@ -123,6 +127,8 @@ def generate_chunks_to_wav(
             f"[{i + 1}/{len(chunks)}] {len(audio) / sr:.1f}s audio in {time.time() - t1:.1f}s :: {chunk[:40]}",
             file=sys.stderr,
         )
+        if on_chunk:
+            on_chunk(i + 1, len(chunks))
         mx.clear_cache()
 
     sil_sentence = os.path.join(tmpdir, "silence_sentence.wav")
@@ -200,6 +206,7 @@ def narrate_story(
     paragraph_pause: float = DEFAULT_PARAGRAPH_PAUSE,
     temperature: float | None = None,
     keep_chunks: bool = False,
+    on_progress: ChunkProgress | None = None,
 ) -> None:
     chunks = split_sentences(story_text, max_chars)
     if not chunks:
@@ -221,6 +228,7 @@ def narrate_story(
             sentence_pause,
             paragraph_pause,
             temperature,
+            on_chunk=on_progress,
         )
         lst = os.path.join(tmpdir, "list.txt")
         ffmpeg_concat_to_out(lst, sr, out_path)
@@ -265,7 +273,12 @@ class StoryGenerator:
         self.model = load_model(model_id)
         print(f"model loaded in {time.time() - t0:.1f}s", file=sys.stderr)
 
-    def generate_story(self, story_text: str, output_path: Path) -> None:
+    def generate_story(
+        self,
+        story_text: str,
+        output_path: Path,
+        on_progress: ChunkProgress | None = None,
+    ) -> None:
         import mlx.core as mx
 
         narrate_story(
@@ -279,6 +292,7 @@ class StoryGenerator:
             paragraph_pause=self.paragraph_pause,
             temperature=self.temperature,
             keep_chunks=self.keep_chunks,
+            on_progress=on_progress,
         )
         try:
             print(f"peak mem {mx.get_peak_memory() / 1e9:.2f} GB", file=sys.stderr)

@@ -15,7 +15,38 @@
         <p class="subtitle">엄마·아빠 목소리로 듣는 동화</p>
       </header>
 
-      <main id="story-list" class="story-list" aria-live="polite"></main>
+      <nav class="tabs" aria-label="메뉴">
+        <button type="button" class="tab is-active" data-tab="stories">이야기</button>
+        <button type="button" class="tab" data-tab="voice">목소리</button>
+      </nav>
+
+      <p id="gen-status" class="gen-status" hidden></p>
+
+      <section id="panel-stories" class="panel">
+        <div class="panel-actions">
+          <button type="button" id="regen-all" class="btn-secondary">전체 다시 만들기</button>
+        </div>
+        <main id="story-list" class="story-list" aria-live="polite"></main>
+      </section>
+
+      <section id="panel-voice" class="panel" hidden>
+        <p class="voice-hint">녹음 대본을 그대로 읽어 주세요. 글과 녹음이 정확히 같아야 목소리가 잘 복제돼요.</p>
+        <label class="field-label" for="transcript">받아쓰기</label>
+        <textarea id="transcript" class="transcript" rows="8" spellcheck="false"></textarea>
+
+        <div class="voice-controls">
+          <button type="button" id="record-btn" class="btn-primary">녹음</button>
+          <button type="button" id="stop-btn" class="btn-secondary" disabled>멈춤</button>
+          <label class="btn-secondary file-label">
+            파일 올리기
+            <input type="file" id="file-input" accept="audio/*,.m4a,.mp4,.wav,.webm" hidden />
+          </label>
+        </div>
+
+        <audio id="preview" class="preview-audio" controls playsinline></audio>
+        <p id="voice-msg" class="voice-msg"></p>
+        <button type="button" id="save-voice" class="btn-primary btn-wide" disabled>목소리 저장</button>
+      </section>
 
       <footer class="footer">
         <p>조용히 듣고, 편안히 쉬어요.</p>
