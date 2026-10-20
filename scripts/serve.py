@@ -13,11 +13,16 @@ import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from download_filenames import (
+    ascii_fallback_filename,
+    content_disposition_attachment,
+    download_basename,
+)
 from generation_service import EnqueueResult, GenerationService, JobState, StoryNotFoundError
 from http_utils import client_ip, parse_multipart, read_json_body, send_json
 from rate_limit import RateLimiter
@@ -60,32 +65,35 @@ def _safe_resolve(base: Path, name: str) -> Path | None:
         return None
 
 
-def load_allowed_audio_ids() -> set[str]:
+def load_catalog_audio() -> tuple[set[str], dict[str, str]]:
     if not MANIFEST_PATH.is_file():
-        return set()
+        return set(), {}
     try:
         data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return set()
+        return set(), {}
     allowed: set[str] = set()
+    titles: dict[str, str] = {}
     for story in data.get("stories", []):
         story_id = story.get("id")
         if not story_id or not STORY_ID_RE.match(story_id):
             continue
         if story.get("hasAudio"):
             allowed.add(story_id)
-    return allowed
+            titles[story_id] = story.get("title") or story_id
+    return allowed, titles
 
 
 class AppState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.allowed_audio_ids: set[str] = set()
+        self.story_titles: dict[str, str] = {}
 
         def refresh() -> None:
             write_manifest(MANIFEST_PATH)
             with self.lock:
-                self.allowed_audio_ids = load_allowed_audio_ids()
+                self.allowed_audio_ids, self.story_titles = load_catalog_audio()
 
         refresh()
         self.generation = GenerationService(on_catalog_refresh=refresh)
@@ -137,7 +145,9 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             return
 
         if route.startswith("/audio/"):
-            self._serve_audio(route)
+            query = parse_qs(parsed.query)
+            download = query.get("download", [""])[0].lower() in {"1", "true", "yes"}
+            self._serve_audio(route, as_download=download)
             return
 
         self._send_error(HTTPStatus.NOT_FOUND)
@@ -217,7 +227,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         else:
             send_json(self, HTTPStatus.OK, payload)
 
-    def _serve_audio(self, route: str) -> None:
+    def _serve_audio(self, route: str, as_download: bool = False) -> None:
         name = route[len("/audio/") :]
         if "/" in name or name != Path(name).name:
             self._send_error(HTTPStatus.NOT_FOUND)
@@ -231,6 +241,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             return
         with self.app.lock:
             allowed = set(self.app.allowed_audio_ids)
+            titles = dict(self.app.story_titles)
         if story_id not in allowed:
             self._send_error(HTTPStatus.NOT_FOUND)
             return
@@ -238,7 +249,13 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         if file_path is None or not file_path.is_file():
             self._send_error(HTTPStatus.NOT_FOUND)
             return
-        self._send_file(file_path, "audio/mp4")
+        disposition = None
+        if as_download:
+            title = titles.get(story_id, story_id)
+            utf8_name = download_basename(title)
+            ascii_name = ascii_fallback_filename(story_id)
+            disposition = content_disposition_attachment(utf8_name, ascii_name)
+        self._send_file(file_path, "audio/mp4", content_disposition=disposition)
 
     def _send_error(self, code: HTTPStatus) -> None:
         self.send_response(code)
@@ -276,7 +293,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         end = min(end, file_size - 1)
         return (start, end)
 
-    def _send_file(self, file_path: Path, content_type: str) -> None:
+    def _send_file(self, file_path: Path, content_type: str, content_disposition: str | None = None) -> None:
         file_size = file_path.stat().st_size
         parsed_range = self._parse_range(file_size)
 
@@ -296,6 +313,8 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         length = end - start + 1
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        if content_disposition:
+            self.send_header("Content-Disposition", content_disposition)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(length))
         if status == HTTPStatus.PARTIAL_CONTENT:

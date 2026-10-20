@@ -87,6 +87,19 @@ function render() {
     regen.textContent = "다시 만들기";
     regen.addEventListener("click", () => enqueueStory(story.id));
 
+    const actions = document.createElement("div");
+    actions.className = "story-actions";
+    actions.append(regen);
+
+    if (story.hasAudio && story.audioUrl) {
+      const download = document.createElement("a");
+      download.className = "btn-secondary regen-btn";
+      download.href = `${story.audioUrl.split("?")[0]}?download=1`;
+      download.textContent = "다운로드";
+      download.setAttribute("aria-label", `${story.title} 오디오 다운로드`);
+      actions.append(download);
+    }
+
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "toggle-text";
@@ -103,7 +116,7 @@ function render() {
 
     btn.addEventListener("click", () => togglePlayback(story, card, btn));
 
-    main.append(title, status, regen, toggle, text);
+    main.append(title, status, actions, toggle, text);
     card.append(btn, main);
     listEl.appendChild(card);
   }
