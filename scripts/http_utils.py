@@ -21,15 +21,46 @@ def client_ip(handler: BaseHTTPRequestHandler) -> str:
     return handler.client_address[0]
 
 
-def send_json(handler: BaseHTTPRequestHandler, status: HTTPStatus, payload: Any) -> None:
+def send_json(
+    handler: BaseHTTPRequestHandler,
+    status: HTTPStatus,
+    payload: Any,
+    *,
+    set_cookies: list[str] | None = None,
+    clear_cookies: list[str] | None = None,
+) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Cache-Control", "no-store")
+    if set_cookies:
+        for cookie in set_cookies:
+            handler.send_header("Set-Cookie", cookie)
+    if clear_cookies:
+        for name in clear_cookies:
+            handler.send_header("Set-Cookie", f"{name}=; Max-Age=0; Path=/; HttpOnly")
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def cookie_secure_flag(handler: BaseHTTPRequestHandler) -> str:
+    host = (handler.headers.get("Host") or "").split(":")[0].lower()
+    if host in {"127.0.0.1", "localhost"}:
+        return ""
+    return "; Secure"
+
+
+def make_session_cookie(token: str, handler: BaseHTTPRequestHandler) -> str:
+    secure = cookie_secure_flag(handler)
+    return (
+        f"sv_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={30 * 24 * 3600}{secure}"
+    )
+
+
+def make_csrf_cookie(token: str, handler: BaseHTTPRequestHandler) -> str:
+    secure = cookie_secure_flag(handler)
+    return f"sv_csrf={token}; Path=/; SameSite=Lax; Max-Age={86400}{secure}"
 
 
 def read_json_body(handler: BaseHTTPRequestHandler, max_bytes: int = 64_000) -> dict | None:
