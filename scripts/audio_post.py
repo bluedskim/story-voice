@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from audio_quality_config import (
+    DIALOGUE_PEAK_LIMITER,
     dialogue_eq_filter,
     dialogue_fade_sec,
     dialogue_gain_db,
@@ -143,12 +144,20 @@ def build_dialogue_middle_chain(sample_rate: int) -> tuple[str, PitchMethod]:
     return ",".join(parts), pitch_method
 
 
+def build_dialogue_tail_filter(correction_db: float, fade_out_start: float, fade: float) -> str:
+    return (
+        f"volume={correction_db:.4f}dB,{DIALOGUE_PEAK_LIMITER},"
+        f"afade=t=out:st={fade_out_start:.4f}:d={fade:.4f}"
+    )
+
+
 def build_dialogue_filter_chain(duration_sec: float, sample_rate: int) -> tuple[str, PitchMethod]:
-    """Full chain for tests (middle + placeholder volume + fade-out)."""
+    """Full chain for tests (middle + placeholder volume + limiter + fade-out)."""
     middle, method = build_dialogue_middle_chain(sample_rate)
     fade = dialogue_fade_sec()
     fade_out_start = max(0.0, duration_sec - fade)
-    return f"{middle},volume=0dB,afade=t=out:st={fade_out_start:.4f}:d={fade:.4f}", method
+    tail = build_dialogue_tail_filter(0.0, fade_out_start, fade)
+    return f"{middle},{tail}", method
 
 
 def ffmpeg_run_af(input_wav: Path, output_wav: Path, af_chain: str, sample_rate: int) -> None:
@@ -210,7 +219,7 @@ def apply_dialogue_style(input_wav: Path, output_wav: Path, sample_rate: int = 2
         ffmpeg_run_af(input_wav, mid, middle_af, sample_rate)
         mean_mid = volumedetect_mean_db(mid)
         correction_db = mean_in - mean_mid
-        tail = f"volume={correction_db:.4f}dB,afade=t=out:st={fade_out_start:.4f}:d={fade:.4f}"
+        tail = build_dialogue_tail_filter(correction_db, fade_out_start, fade)
         ffmpeg_run_af(mid, output_wav, tail, sample_rate)
 
     if dialogue_eq_filter():

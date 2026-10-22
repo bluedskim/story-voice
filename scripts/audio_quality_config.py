@@ -12,6 +12,10 @@ DEFAULT_PARAGRAPH_PAUSE = 0.75
 DEFAULT_DIALOGUE_PITCH_ST = 0.0
 DEFAULT_DIALOGUE_GAIN_DB = 0.0
 DEFAULT_DIALOGUE_FADE_SEC = 0.012
+# Peak limit after loudness match (~-1 dBFS) before fade-out
+DIALOGUE_PEAK_LIMITER = "alimiter=limit=0.89:level=false"
+
+DEFAULT_DIALOGUE_EQ_PRESET = "airy"
 
 DIALOGUE_EQ_PRESETS: dict[str, str] = {
     "bright": (
@@ -52,16 +56,16 @@ def dialogue_fade_sec() -> float:
 
 
 def dialogue_eq_filter() -> str | None:
-    """Custom ffmpeg audio filter chain, or named preset, or None (EQ off)."""
+    """Custom ffmpeg chain, named preset, or default ``airy`` when dialogue style is on."""
     custom = os.environ.get("STORY_VOICE_DIALOGUE_EQ", "").strip()
     if custom:
         return custom
     preset = os.environ.get("STORY_VOICE_DIALOGUE_EQ_PRESET", "").strip().lower()
-    if preset:
-        chain = DIALOGUE_EQ_PRESETS.get(preset)
-        if chain:
-            return chain
-    return None
+    if preset in {"off", "none", "0"}:
+        return None
+    if not preset:
+        preset = DEFAULT_DIALOGUE_EQ_PRESET
+    return DIALOGUE_EQ_PRESETS.get(preset)
 
 
 def narration_loudnorm_enabled() -> bool:
