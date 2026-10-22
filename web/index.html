@@ -3,11 +3,24 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f1419" />
+    <meta name="theme-color" content="#1a2340" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fff8f0" media="(prefers-color-scheme: light)" />
     <title>잠자리 이야기</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <div class="sky" aria-hidden="true">
+      <span class="star star-a"></span>
+      <span class="star star-b"></span>
+      <span class="star star-c"></span>
+      <span class="moon"></span>
+    </div>
+
     <div class="app">
       <header class="header">
         <p class="eyebrow">story-voice</p>
@@ -16,55 +29,114 @@
       </header>
 
       <nav class="tabs" aria-label="메뉴">
-        <button type="button" class="tab is-active" data-tab="stories">이야기</button>
-        <button type="button" class="tab" data-tab="voice">목소리</button>
+        <button type="button" class="tab is-active" data-tab="stories" aria-selected="true">이야기</button>
+        <button type="button" class="tab" data-tab="voice" aria-selected="false">목소리</button>
       </nav>
 
-      <p id="gen-status" class="gen-status" hidden></p>
+      <div id="gen-status" class="gen-status" hidden role="status">
+        <p class="gen-status-text" id="gen-status-text"></p>
+        <div class="gen-progress" id="gen-progress" hidden>
+          <div class="gen-progress-bar" id="gen-progress-bar"></div>
+        </div>
+      </div>
 
       <section id="panel-stories" class="panel">
         <div class="panel-actions">
-          <button type="button" id="regen-all" class="btn-secondary">전체 다시 만들기</button>
+          <button type="button" id="regen-all" class="btn btn-secondary">
+            <span class="btn-icon" aria-hidden="true">✨</span>
+            전체 다시 만들기
+          </button>
         </div>
         <main id="story-list" class="story-list" aria-live="polite"></main>
       </section>
 
       <section id="panel-voice" class="panel" hidden>
-        <p class="voice-hint">
-          1단계: 아래 대본을 읽어 녹음하거나 파일을 올려 주세요. 2단계: 자동 받아쓰기를 확인한 뒤 저장합니다.
-          녹음과 받아쓰기가 같아야 이야기 길이가 정상이에요.
-        </p>
-        <label class="field-label" for="record-script">녹음 대본</label>
-        <textarea id="record-script" class="transcript transcript-readonly" rows="6" readonly spellcheck="false"></textarea>
+        <ol class="voice-steps" aria-label="목소리 저장 단계">
+          <li class="voice-step is-active" data-step="1">
+            <span class="voice-step-num">1</span>
+            <span>녹음</span>
+          </li>
+          <li class="voice-step" data-step="2">
+            <span class="voice-step-num">2</span>
+            <span>받아쓰기</span>
+          </li>
+          <li class="voice-step" data-step="3">
+            <span class="voice-step-num">3</span>
+            <span>저장</span>
+          </li>
+        </ol>
 
-        <div class="voice-controls">
-          <button type="button" id="record-btn" class="btn-primary">녹음</button>
-          <button type="button" id="stop-btn" class="btn-secondary" disabled>멈춤</button>
-          <label class="btn-secondary file-label">
-            파일 올리기
-            <input type="file" id="file-input" accept="audio/*,.m4a,.mp4,.wav,.webm" hidden />
-          </label>
+        <div class="card voice-card">
+          <p class="voice-hint">
+            대본을 읽어 녹음하거나 파일을 올려 주세요. 받아쓰기가 녹음과 같아야 이야기 길이가 정상이에요.
+          </p>
+          <label class="field-label" for="record-script">녹음 대본</label>
+          <textarea id="record-script" class="transcript transcript-readonly" rows="5" readonly spellcheck="false"></textarea>
+
+          <div class="voice-controls">
+            <button type="button" id="record-btn" class="btn btn-primary">
+              <span class="btn-icon" aria-hidden="true">🎙</span>
+              녹음
+            </button>
+            <button type="button" id="stop-btn" class="btn btn-secondary" disabled>멈춤</button>
+            <label class="btn btn-secondary file-label">
+              파일 올리기
+              <input type="file" id="file-input" accept="audio/*,.m4a,.mp4,.wav,.webm" hidden />
+            </label>
+          </div>
+
+          <div class="preview-player">
+            <audio id="preview" class="preview-audio" playsinline></audio>
+            <p class="preview-label">미리 듣기</p>
+            <div class="mini-player" id="preview-player-ui" hidden>
+              <button type="button" class="mini-play" id="preview-play" aria-label="미리 듣기 재생">▶</button>
+              <span class="mini-time" id="preview-time">0:00</span>
+            </div>
+          </div>
+
+          <button type="button" id="prepare-voice" class="btn btn-secondary btn-wide" disabled>받아쓰기 확인</button>
         </div>
 
-        <audio id="preview" class="preview-audio" controls playsinline></audio>
-
-        <button type="button" id="prepare-voice" class="btn-secondary btn-wide" disabled>받아쓰기 확인</button>
-
-        <div id="voice-review" class="voice-review" hidden>
+        <div id="voice-review" class="card voice-review" hidden>
           <p id="voice-meta" class="voice-meta"></p>
-          <p id="voice-match" class="voice-match" aria-live="polite"></p>
+          <div id="voice-match" class="voice-match" aria-live="polite">
+            <span class="match-ring" id="match-ring"></span>
+            <span class="match-text" id="match-text"></span>
+          </div>
           <label class="field-label" for="transcript">받아쓰기 (수정 가능)</label>
           <textarea id="transcript" class="transcript" rows="6" spellcheck="false"></textarea>
-          <button type="button" id="save-voice" class="btn-primary btn-wide">이 목소리로 저장</button>
+          <button type="button" id="save-voice" class="btn btn-primary btn-wide">이 목소리로 저장</button>
         </div>
 
-        <p id="voice-msg" class="voice-msg"></p>
+        <p id="voice-msg" class="voice-msg" role="status"></p>
       </section>
 
       <footer class="footer">
         <p>조용히 듣고, 편안히 쉬어요.</p>
       </footer>
     </div>
+
+    <aside id="now-playing" class="now-playing" hidden aria-label="재생 중">
+      <div class="np-art" id="np-art" aria-hidden="true">📖</div>
+      <div class="np-body">
+        <p class="np-title" id="np-title">—</p>
+        <div class="np-times">
+          <span id="np-current">0:00</span>
+          <span class="np-sep">/</span>
+          <span id="np-duration">0:00</span>
+        </div>
+        <input
+          type="range"
+          id="np-seek"
+          class="np-seek"
+          min="0"
+          max="1000"
+          value="0"
+          aria-label="재생 위치"
+        />
+      </div>
+      <button type="button" id="np-play" class="np-play" aria-label="일시정지">⏸</button>
+    </aside>
 
     <audio id="player" preload="metadata"></audio>
     <script src="app.js" type="module"></script>
