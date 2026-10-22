@@ -37,37 +37,13 @@ DEFAULT_PAUSE = 0.35
 DEFAULT_SENTENCE_PAUSE = 0.35
 DEFAULT_PARAGRAPH_PAUSE = 0.75
 
-SENTENCE_END_RE = r"(?<=[.!?。！？…\"\"'''])\s+"
-
 
 def split_sentences(text: str, max_chars: int) -> list[tuple[str, str]]:
-    """Split story into TTS chunks (~max_chars) and label pauses after each chunk.
+    """Split story into TTS chunks (~max_chars) and label pauses after each chunk."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from story_segmentation import split_story_into_chunks
 
-    Returns list of (chunk_text, pause_kind) where pause_kind is ``sentence`` or
-    ``paragraph`` (end of a paragraph). The last chunk's pause_kind is ignored.
-    """
-    text = re.sub(r"[ \t]+", " ", text.strip())
-    parts: list[tuple[str, str]] = []
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
-    for para in paragraphs:
-        sents = re.split(SENTENCE_END_RE, para)
-        buf = ""
-        para_chunks: list[str] = []
-        for s in sents:
-            s = s.strip()
-            if not s:
-                continue
-            if buf and len(buf) + 1 + len(s) > max_chars:
-                para_chunks.append(buf)
-                buf = s
-            else:
-                buf = f"{buf} {s}".strip()
-        if buf:
-            para_chunks.append(buf)
-        for ci, chunk in enumerate(para_chunks):
-            pause_kind = "paragraph" if ci == len(para_chunks) - 1 else "sentence"
-            parts.append((chunk, pause_kind))
-    return parts
+    return [(c.text, c.pause_after) for c in split_story_into_chunks(text, max_chars)]
 
 
 def load_ref_text(ref_text: str | Path) -> str:
@@ -89,7 +65,7 @@ def read_story_text(story_path: Path, catalog_mode: bool) -> str:
 
 def generate_chunks_to_wav(
     model,
-    chunks: list[tuple[str, str]],
+    chunks: list[tuple[str, str, str]],
     ref_audio: str | Path,
     ref_text: str,
     lang: str,
@@ -97,17 +73,21 @@ def generate_chunks_to_wav(
     sentence_pause: float,
     paragraph_pause: float,
     temperature: float | None,
+    dialogue_style: bool = True,
     on_chunk: ChunkProgress | None = None,
 ) -> tuple[list[str], int]:
     import mlx.core as mx
     import numpy as np
     from mlx_audio import audio_io as sf
 
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from audio_post import apply_dialogue_style, apply_narration_loudnorm_if_enabled
+
     ref_audio_str = os.fspath(ref_audio)
     sr = getattr(model, "sample_rate", 24000)
     files: list[str] = []
 
-    for i, (chunk, pause_kind) in enumerate(chunks):
+    for i, (chunk, pause_kind, role) in enumerate(chunks):
         t1 = time.time()
         kw: dict = dict(text=chunk, ref_audio=ref_audio_str, ref_text=ref_text, lang_code=lang)
         if temperature is not None:
@@ -122,9 +102,17 @@ def generate_chunks_to_wav(
         )
         f = os.path.join(tmpdir, f"chunk_{i:04d}.wav")
         sf.write(f, audio, sr)
+        chunk_path = Path(f)
+        if role == "dialogue" and dialogue_style:
+            styled = chunk_path.with_name(f"chunk_{i:04d}_styled.wav")
+            apply_dialogue_style(chunk_path, styled, sr)
+            styled.replace(chunk_path)
+        elif role == "narration":
+            apply_narration_loudnorm_if_enabled(chunk_path, sr)
         files.append(f)
         print(
-            f"[{i + 1}/{len(chunks)}] {len(audio) / sr:.1f}s audio in {time.time() - t1:.1f}s :: {chunk[:40]}",
+            f"[{i + 1}/{len(chunks)}] {len(audio) / sr:.1f}s audio in {time.time() - t1:.1f}s "
+            f"[{role}] :: {chunk[:40]}",
             file=sys.stderr,
         )
         if on_chunk:
@@ -160,12 +148,19 @@ def generate_chunks_to_wav(
     with open(lst, "w", encoding="utf-8") as fh:
         for i, f in enumerate(files):
             if i:
-                _, pause_kind = chunks[i - 1]
+                _, pause_kind, _role = chunks[i - 1]
                 sil = sil_paragraph if pause_kind == "paragraph" else sil_sentence
                 fh.write(f"file '{sil}'\n")
             fh.write(f"file '{f}'\n")
 
     return files, sr
+
+
+def story_chunks_for_tts(story_text: str, max_chars: int) -> list[tuple[str, str, str]]:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from story_segmentation import split_story_into_chunks
+
+    return [(c.text, c.pause_after, c.role) for c in split_story_into_chunks(story_text, max_chars)]
 
 
 def ffmpeg_concat_to_out(list_path: str, sr: int, out_path: Path) -> None:
@@ -205,10 +200,11 @@ def narrate_story(
     sentence_pause: float = DEFAULT_SENTENCE_PAUSE,
     paragraph_pause: float = DEFAULT_PARAGRAPH_PAUSE,
     temperature: float | None = None,
+    dialogue_style: bool = True,
     keep_chunks: bool = False,
     on_progress: ChunkProgress | None = None,
 ) -> None:
-    chunks = split_sentences(story_text, max_chars)
+    chunks = story_chunks_for_tts(story_text, max_chars)
     if not chunks:
         raise ValueError("Story text is empty")
     print(f"{len(chunks)} chunks", file=sys.stderr)
@@ -228,6 +224,7 @@ def narrate_story(
             sentence_pause,
             paragraph_pause,
             temperature,
+            dialogue_style=dialogue_style,
             on_chunk=on_progress,
         )
         lst = os.path.join(tmpdir, "list.txt")
@@ -254,9 +251,13 @@ class StoryGenerator:
         sentence_pause: float = DEFAULT_SENTENCE_PAUSE,
         paragraph_pause: float = DEFAULT_PARAGRAPH_PAUSE,
         temperature: float | None = None,
+        dialogue_style: bool | None = None,
         keep_chunks: bool = False,
     ) -> None:
         from mlx_audio.tts.utils import load_model
+
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from audio_quality_config import dialogue_style_enabled
 
         self.ref_audio = ref_audio
         if ref_text is None:
@@ -267,6 +268,7 @@ class StoryGenerator:
         self.sentence_pause = sentence_pause
         self.paragraph_pause = paragraph_pause
         self.temperature = temperature
+        self.dialogue_style = dialogue_style if dialogue_style is not None else dialogue_style_enabled()
         self.keep_chunks = keep_chunks
         t0 = time.time()
         print(f"Loading model {model_id}…", file=sys.stderr)
@@ -291,6 +293,7 @@ class StoryGenerator:
             sentence_pause=self.sentence_pause,
             paragraph_pause=self.paragraph_pause,
             temperature=self.temperature,
+            dialogue_style=self.dialogue_style,
             keep_chunks=self.keep_chunks,
             on_progress=on_progress,
         )
@@ -343,6 +346,11 @@ def main() -> None:
     ap.add_argument("--sentence-pause", type=float, default=None)
     ap.add_argument("--paragraph-pause", type=float, default=None)
     ap.add_argument("--temperature", type=float, default=None)
+    ap.add_argument(
+        "--no-dialogue-style",
+        action="store_true",
+        help="Disable dialogue-only post-process (pitch/gain/fades)",
+    )
     ap.add_argument("--keep-chunks", action="store_true")
     a = ap.parse_args()
 
@@ -389,6 +397,11 @@ def main() -> None:
     if not ref_audio.is_file():
         sys.exit(f"Reference audio not found: {ref_audio}")
 
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from audio_quality_config import dialogue_style_enabled
+
+    dialogue_style = dialogue_style_enabled() and not a.no_dialogue_style
+
     gen = StoryGenerator(
         model_id=a.model,
         ref_audio=ref_audio,
@@ -397,6 +410,7 @@ def main() -> None:
         sentence_pause=sentence_pause,
         paragraph_pause=paragraph_pause,
         temperature=a.temperature,
+        dialogue_style=dialogue_style,
         keep_chunks=a.keep_chunks,
     )
     gen.generate_story(story_text, out)
