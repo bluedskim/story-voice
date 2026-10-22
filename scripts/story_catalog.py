@@ -44,6 +44,13 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return meta, body
 
 
+def story_body_from_path(path: Path) -> str:
+    """Story text for TTS (YAML front matter stripped when present)."""
+    raw = path.read_text(encoding="utf-8")
+    _, body = _parse_frontmatter(raw)
+    return body
+
+
 def load_story(path: Path) -> Story:
     raw = path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(raw)

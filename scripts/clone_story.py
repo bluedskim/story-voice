@@ -53,14 +53,12 @@ def load_ref_text(ref_text: str | Path) -> str:
     return str(ref_text).strip()
 
 
-def read_story_text(story_path: Path, catalog_mode: bool) -> str:
-    raw = story_path.read_text(encoding="utf-8")
-    if not catalog_mode:
-        return raw
+def read_story_text(story_path: Path, catalog_mode: bool = True) -> str:
+    """Load story body for TTS; always strips YAML front matter when present."""
     sys.path.insert(0, str(ROOT / "scripts"))
-    from story_catalog import load_story
+    from story_catalog import story_body_from_path
 
-    return load_story(story_path).body
+    return story_body_from_path(story_path)
 
 
 def generate_chunks_to_wav(
@@ -82,6 +80,7 @@ def generate_chunks_to_wav(
 
     sys.path.insert(0, str(ROOT / "scripts"))
     from audio_post import apply_dialogue_style, apply_narration_loudnorm_if_enabled
+    from audio_quality_config import dialogue_post_should_run
 
     ref_audio_str = os.fspath(ref_audio)
     sr = getattr(model, "sample_rate", 24000)
@@ -103,7 +102,7 @@ def generate_chunks_to_wav(
         f = os.path.join(tmpdir, f"chunk_{i:04d}.wav")
         sf.write(f, audio, sr)
         chunk_path = Path(f)
-        if role == "dialogue" and dialogue_style:
+        if role == "dialogue" and dialogue_style and dialogue_post_should_run():
             styled = chunk_path.with_name(f"chunk_{i:04d}_styled.wav")
             apply_dialogue_style(chunk_path, styled, sr)
             styled.replace(chunk_path)

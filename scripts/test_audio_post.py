@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -13,11 +14,15 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from audio_post import (
     apply_dialogue_style,
-    build_dialogue_filter_chain,
-    ffmpeg_has_rubberband,
-    pitch_filter_expr,
+    build_dialogue_middle_chain,
+    volumedetect_mean_db,
 )
-from audio_quality_config import DEFAULT_DIALOGUE_GAIN_DB, DEFAULT_DIALOGUE_PITCH_ST
+from audio_quality_config import (
+    DEFAULT_DIALOGUE_GAIN_DB,
+    DEFAULT_DIALOGUE_PITCH_ST,
+    dialogue_eq_filter,
+    dialogue_post_should_run,
+)
 
 
 def make_tone_wav(path: Path, duration: float = 0.5) -> None:
@@ -41,40 +46,48 @@ def make_tone_wav(path: Path, duration: float = 0.5) -> None:
     )
 
 
-def test_pitch_filter_prefers_rubberband_when_available() -> None:
-    expr, method = pitch_filter_expr(DEFAULT_DIALOGUE_PITCH_ST, 24000)
-    if ffmpeg_has_rubberband():
-        assert method == "rubberband"
-        assert expr.startswith("rubberband=pitch=")
-    else:
-        assert method == "asetrate"
-        assert "asetrate=" in expr
-        assert "atempo=" in expr
+def test_defaults_no_dialogue_post() -> None:
+    for key in ("STORY_VOICE_DIALOGUE_EQ", "STORY_VOICE_DIALOGUE_EQ_PRESET"):
+        os.environ.pop(key, None)
+    assert DEFAULT_DIALOGUE_PITCH_ST == 0.0
+    assert DEFAULT_DIALOGUE_GAIN_DB == 0.0
+    assert dialogue_eq_filter() is None
+    assert not dialogue_post_should_run()
 
 
-def test_dialogue_filter_includes_fades_and_gain() -> None:
-    chain, _ = build_dialogue_filter_chain(1.0, 24000)
-    assert "afade=t=in" in chain
-    assert "afade=t=out" in chain
-    assert f"volume={DEFAULT_DIALOGUE_GAIN_DB}dB" in chain
+def test_bright_preset_chain() -> None:
+    os.environ["STORY_VOICE_DIALOGUE_EQ_PRESET"] = "bright"
+    try:
+        eq = dialogue_eq_filter()
+        assert eq and "highpass=f=90" in eq
+        chain, _ = build_dialogue_middle_chain(24000)
+        assert "highpass=f=90" in chain
+        assert "afade=t=in" in chain
+    finally:
+        os.environ.pop("STORY_VOICE_DIALOGUE_EQ_PRESET", None)
 
 
-def test_apply_dialogue_style_writes_output() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "in.wav"
-        out = Path(tmp) / "out.wav"
-        make_tone_wav(src, 0.4)
-        method = apply_dialogue_style(src, out, 24000)
-        assert out.is_file()
-        assert out.stat().st_size > 0
-        assert method in {"rubberband", "asetrate"}
+def test_apply_eq_loudness_match() -> None:
+    os.environ["STORY_VOICE_DIALOGUE_EQ_PRESET"] = "bright"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.wav"
+            out = Path(tmp) / "out.wav"
+            make_tone_wav(src, 0.5)
+            mean_in = volumedetect_mean_db(src)
+            mode = apply_dialogue_style(src, out, 24000)
+            assert mode.startswith("eq")
+            mean_out = volumedetect_mean_db(out)
+            assert abs(mean_out - mean_in) < 1.5
+    finally:
+        os.environ.pop("STORY_VOICE_DIALOGUE_EQ_PRESET", None)
 
 
 def main() -> int:
-    test_pitch_filter_prefers_rubberband_when_available()
-    test_dialogue_filter_includes_fades_and_gain()
-    test_apply_dialogue_style_writes_output()
-    print(f"OK: audio post tests (pitch method on this host: {'rubberband' if ffmpeg_has_rubberband() else 'asetrate'})")
+    test_defaults_no_dialogue_post()
+    test_bright_preset_chain()
+    test_apply_eq_loudness_match()
+    print("OK: audio post tests")
     return 0
 
 
