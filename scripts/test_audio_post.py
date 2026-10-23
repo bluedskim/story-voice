@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from audio_post import (
+    _parse_loudnorm_json,
     apply_dialogue_style,
+    apply_final_loudnorm_if_enabled,
     build_dialogue_middle_chain,
     build_dialogue_tail_filter,
     volumedetect_mean_db,
@@ -98,6 +100,57 @@ def test_tail_includes_limiter_before_fade() -> None:
     assert tail.index(DIALOGUE_PEAK_LIMITER) < tail.index("afade=t=out")
 
 
+FFMPEG9_LOUDNORM_STDERR = """[Parsed_loudnorm_0 @ 0xaaaabbbb] 
+{
+    "input_i" : "-20.64",
+    "input_tp" : "-1.23",
+    "input_lra" : "0.00",
+    "input_thresh" : "-30.64",
+    "output_i" : "-16.00",
+    "output_tp" : "-1.50",
+    "output_lra" : "0.00",
+    "output_thresh" : "-26.05",
+    "normalization_type" : "linear",
+    "target_offset" : "0.05"
+}
+[out#0/null @ 0xccccdddd] 
+muxing overhead: unknown
+size=       0KiB time=00:00:01.00 bitrate=   0.0kbits/s speed= 100x    
+"""
+
+
+def test_parse_loudnorm_json_ffmpeg9_trailing_lines() -> None:
+    stats = _parse_loudnorm_json(FFMPEG9_LOUDNORM_STDERR)
+    assert stats["input_i"] == "-20.64"
+    assert stats["target_offset"] == "0.05"
+
+
+def test_parse_loudnorm_json_brace_noise_before() -> None:
+    stderr = (
+        "[ffmpeg] unrelated {brace: noise} in log line\n"
+        + FFMPEG9_LOUDNORM_STDERR
+    )
+    stats = _parse_loudnorm_json(stderr)
+    assert stats["input_i"] == "-20.64"
+
+
+def test_loudnorm_fallback_keeps_input_on_failure() -> None:
+    from unittest import mock
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "story.wav"
+        make_tone_wav(src, 0.3)
+        before = src.read_bytes()
+        os.environ["STORY_VOICE_LOUDNORM"] = "1"
+        with mock.patch(
+            "audio_post.loudnorm_two_pass_wav",
+            side_effect=RuntimeError("simulated loudnorm failure"),
+        ):
+            result = apply_final_loudnorm_if_enabled(src)
+        assert result == src
+        assert src.read_bytes() == before
+
+
 def test_apply_eq_loudness_match() -> None:
     _clear_dialogue_env()
     with tempfile.TemporaryDirectory() as tmp:
@@ -116,6 +169,9 @@ def main() -> int:
     test_disable_dialogue_style()
     test_bright_preset_override()
     test_tail_includes_limiter_before_fade()
+    test_parse_loudnorm_json_ffmpeg9_trailing_lines()
+    test_parse_loudnorm_json_brace_noise_before()
+    test_loudnorm_fallback_keeps_input_on_failure()
     test_apply_eq_loudness_match()
     print("OK: audio post tests")
     return 0

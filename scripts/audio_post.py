@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
@@ -238,12 +239,12 @@ def apply_narration_loudnorm_if_enabled(input_wav: Path, sample_rate: int = 2400
 
 
 def _parse_loudnorm_json(stderr: str) -> dict[str, str]:
-    import json
-
-    start = stderr.rfind("{")
+    key = stderr.rfind('"input_i"')
+    start = stderr.rfind("{", 0, key) if key >= 0 else -1
     if start < 0:
         raise RuntimeError("loudnorm pass1: no JSON in ffmpeg output")
-    return json.loads(stderr[start:])
+    obj, _end = json.JSONDecoder().raw_decode(stderr[start:])
+    return obj
 
 
 def loudnorm_two_pass_wav(input_wav: Path, output_wav: Path, integrated_lufs: float) -> None:
@@ -303,9 +304,21 @@ def apply_final_loudnorm_if_enabled(input_wav: Path, output_wav: Path | None = N
 
             shutil.copy2(input_wav, output_wav)
         return input_wav
+    in_place = output_wav is None
     target = output_wav or input_wav.with_suffix(".normalized.wav")
-    loudnorm_two_pass_wav(input_wav, target, final_loudnorm_integrated())
-    if output_wav is None:
+    try:
+        loudnorm_two_pass_wav(input_wav, target, final_loudnorm_integrated())
+    except Exception as exc:
+        print(
+            f"WARNING: story loudnorm failed ({exc}); using un-normalized audio",
+            file=sys.stderr,
+        )
+        if not in_place and target != input_wav:
+            import shutil
+
+            shutil.copy2(input_wav, target)
+        return input_wav if in_place else target
+    if in_place:
         target.replace(input_wav)
         return input_wav
     return target
