@@ -138,7 +138,7 @@ def main() -> int:
         tmp_path = Path(tmp)
         db = tmp_path / "auth.db"
         mail_file = tmp_path / "mail.jsonl"
-        env = test_server_env(db, mail_file)
+        env = test_server_env(db, mail_file, admin_emails="test-admin@example.com")
         env["STORY_VOICE_VOICE_ASR"] = "fake"
         short = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()[:60]
         env["STORY_VOICE_FAKE_ASR_TEXT"] = short

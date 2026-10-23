@@ -7,6 +7,7 @@ import hmac
 import os
 import re
 import secrets
+import sys
 import time
 
 from auth_config import session_secret_bytes
@@ -51,16 +52,22 @@ def admin_emails() -> set[str]:
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
-def resolve_user_type(email: str, db: AuthDatabase) -> str:
-    if db.user_count() == 0:
-        return USER_TYPE_ADMIN
-    if email.lower() in admin_emails():
-        return USER_TYPE_ADMIN
-    return USER_TYPE_MEMBER
+def user_is_admin(user: UserRow) -> bool:
+    return user.email.lower() in admin_emails()
+
+
+def warn_if_no_admin_emails() -> None:
+    if admin_emails():
+        return
+    print(
+        "WARNING: STORY_VOICE_ADMIN_EMAILS is empty — no operator accounts; "
+        "voice upload and story generation are disabled for everyone.",
+        file=sys.stderr,
+    )
 
 
 def user_public(user: UserRow) -> dict:
-    is_admin = user.user_type == USER_TYPE_ADMIN
+    is_admin = user_is_admin(user)
     return {
         "email": user.email,
         "nickname": user.nickname,
@@ -175,8 +182,7 @@ def signup(
         raise AuthError("인증코드가 맞지 않아요.", "invalid_code", 400)
 
     db.delete_verification(email)
-    user_type = resolve_user_type(email, db)
-    return db.create_user(email, nickname, hash_password(password), user_type)
+    return db.create_user(email, nickname, hash_password(password), USER_TYPE_MEMBER)
 
 
 def login(db: AuthDatabase, login_id: str, password: str) -> tuple[str, UserRow]:
