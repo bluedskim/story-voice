@@ -94,7 +94,7 @@ def test_prepare_and_confirm_integration() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         mail_file = tmp_path / "mail.jsonl"
-        env = test_server_env(tmp_path / "auth.db", mail_file)
+        env = test_server_env(tmp_path / "auth.db", mail_file, admin_emails="test-admin@example.com")
         env["STORY_VOICE_VOICE_ASR"] = "fake"
         short_asr = "가" * 40
         env["STORY_VOICE_FAKE_ASR_TEXT"] = short_asr
@@ -184,7 +184,7 @@ def test_prepare_blocked_during_generation() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         mail_file = tmp_path / "mail.jsonl"
-        env = test_server_env(tmp_path / "auth.db", mail_file)
+        env = test_server_env(tmp_path / "auth.db", mail_file, admin_emails="test-admin@example.com")
         env["STORY_VOICE_VOICE_ASR"] = "fake"
         env["STORY_VOICE_FAKE_CHUNK_DELAY"] = "30"
         env["STORY_VOICE_FAKE_ASR_TEXT"] = "테스트"

@@ -16,7 +16,11 @@ def read_last_mail_code(mail_file: Path) -> str:
     return json.loads(lines[-1])["code"]
 
 
-def test_server_env(db_path: Path, mail_file: Path) -> dict[str, str]:
+def test_server_env(
+    db_path: Path,
+    mail_file: Path,
+    admin_emails: str | None = None,
+) -> dict[str, str]:
     env = os.environ.copy()
     env["STORY_VOICE_GENERATOR"] = "fake"
     env["STORY_VOICE_DB_PATH"] = str(db_path)
@@ -24,6 +28,10 @@ def test_server_env(db_path: Path, mail_file: Path) -> dict[str, str]:
     env["STORY_VOICE_RESEND_COOLDOWN_SEC"] = "0"
     env["STORY_VOICE_TEST_MAIL_FILE"] = str(mail_file)
     env.pop("STORY_VOICE_SMTP_HOST", None)
+    if admin_emails is not None:
+        env["STORY_VOICE_ADMIN_EMAILS"] = admin_emails
+    else:
+        env.pop("STORY_VOICE_ADMIN_EMAILS", None)
     mail_file.write_text("", encoding="utf-8")
     return env
 

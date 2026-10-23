@@ -37,7 +37,9 @@ from auth_service import (
     send_verification,
     signup,
     user_from_session,
+    user_is_admin,
     user_public,
+    warn_if_no_admin_emails,
 )
 from http_utils import (
     client_ip,
@@ -168,7 +170,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 {"error": "로그인이 필요해요.", "code": "auth_required"},
             )
             return None
-        if not user.is_admin:
+        if not user_is_admin(user):
             send_json(
                 self,
                 HTTPStatus.FORBIDDEN,
@@ -654,6 +656,7 @@ def main() -> None:
         os.environ["STORY_VOICE_GENERATOR"] = args.generator
 
     ensure_session_secret()
+    warn_if_no_admin_emails()
 
     WEB_DIR.mkdir(parents=True, exist_ok=True)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)

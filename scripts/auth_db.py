@@ -33,7 +33,9 @@ class UserRow:
 
     @property
     def is_admin(self) -> bool:
-        return self.user_type == USER_TYPE_ADMIN
+        from auth_service import user_is_admin
+
+        return user_is_admin(self)
 
 
 class AuthDatabase:

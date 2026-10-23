@@ -99,7 +99,7 @@ python scripts/serve.py
 | 구분 | 설명 |
 |------|------|
 | **회원** | 이야기 재생·다운로드 |
-| **운영자** | 목소리 저장, 이야기 다시 만들기 (첫 가입자 또는 `STORY_VOICE_ADMIN_EMAILS`에 있는 이메일) |
+| **운영자** | 목소리 저장, 이야기 다시 만들기 (`STORY_VOICE_ADMIN_EMAILS`에 있는 이메일만; 로그인·`/api/auth/me`마다 목록과 대조) |
 
 SQLite: `data/story_voice.db` (git 제외). 비밀번호는 scrypt.
 
@@ -128,7 +128,7 @@ export RESEND_API_KEY="re_..."
 export STORY_VOICE_MAIL_FROM='Story Voice <noreply@baem.app>'   # 기본값 동일
 export STORY_VOICE_MAIL_MODE=resend   # resend | log
 
-# 운영자 이메일 (쉼표 구분, 첫 사용자는 자동 운영자)
+# 운영자 이메일 (쉼표 구분, 대소문자 무시). 비어 있으면 운영자 없음(서버 시작 시 경고)
 export STORY_VOICE_ADMIN_EMAILS="you@example.com"
 ```
 
