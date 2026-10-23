@@ -8,10 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT / "web"
 
-# Relative paths under web/ that get ?v=<hash> in HTML and manifest.
 CACHE_BUST_ASSETS = (
     "styles.css",
     "app.js",
+    "auth.js",
     "favicon.ico",
     "manifest.webmanifest",
     "icons/favicon.svg",
@@ -40,7 +40,7 @@ def web_asset_versions() -> dict[str, str]:
 
 def inject_asset_versions(text: str, versions: dict[str, str]) -> str:
     for rel, ver in sorted(versions.items(), key=lambda x: -len(x[0])):
-        quoted = f'"{rel}"'
-        busted = f'"{rel}?v={ver}"'
-        text = text.replace(quoted, busted)
+        text = text.replace(f'href="{rel}"', f'href="{rel}?v={ver}"')
+        text = text.replace(f'src="{rel}"', f'src="{rel}?v={ver}"')
+        text = text.replace(f'"{rel}"', f'"{rel}?v={ver}"')
     return text

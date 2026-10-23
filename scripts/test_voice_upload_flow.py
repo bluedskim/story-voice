@@ -17,6 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from test_auth_helpers import auth_headers, signup_admin, test_server_env
+
 PORT = 18766
 
 
@@ -89,70 +91,76 @@ def test_duration_text_bounds_unit() -> None:
 def test_prepare_and_confirm_integration() -> None:
     from voice_service import REF_TXT, REF_WAV
 
-    env = os.environ.copy()
-    env["STORY_VOICE_GENERATOR"] = "fake"
-    env["STORY_VOICE_VOICE_ASR"] = "fake"
-    short_asr = "가" * 40
-    env["STORY_VOICE_FAKE_ASR_TEXT"] = short_asr
-    proc = subprocess.Popen(
-        [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
-        cwd=ROOT,
-        env=env,
-    )
-    try:
-        wait_server()
-        REF_WAV.parent.mkdir(parents=True, exist_ok=True)
-        REF_TXT.write_text("기존 참조 텍스트\n", encoding="utf-8")
-        if REF_WAV.is_file():
-            REF_WAV.unlink()
-        make_upload_wav(REF_WAV, 8.0)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            wav = Path(tmp) / "upload.wav"
-            make_upload_wav(wav, 8.0)
-            res = http(
-                "POST",
-                "/api/voice/prepare",
-                data=multipart_audio_only(wav),
-                headers={"Content-Type": "multipart/form-data; boundary=----storyvoice"},
-            )
-            assert res.status == 200
-            prep = json.loads(res.read().decode())
-            assert prep.get("pendingToken")
-            assert prep.get("transcript") == short_asr
-            assert REF_TXT.read_text(encoding="utf-8").startswith("기존")
-
-            confirm_body = json.dumps(
-                {"pendingToken": prep["pendingToken"], "transcript": short_asr},
-                ensure_ascii=False,
-            ).encode("utf-8")
-            res2 = http(
-                "POST",
-                "/api/voice/confirm",
-                data=confirm_body,
-                headers={"Content-Type": "application/json"},
-            )
-            assert res2.status == 200
-            assert REF_TXT.read_text(encoding="utf-8").strip() == short_asr
-            assert REF_WAV.is_file()
-            history = list((ROOT / "data" / "voice" / "history").glob("*"))
-            assert history, "expected backup dir"
-
-        # expired token
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        mail_file = tmp_path / "mail.jsonl"
+        env = test_server_env(tmp_path / "auth.db", mail_file)
+        env["STORY_VOICE_VOICE_ASR"] = "fake"
+        short_asr = "가" * 40
+        env["STORY_VOICE_FAKE_ASR_TEXT"] = short_asr
+        proc = subprocess.Popen(
+            [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
+            cwd=ROOT,
+            env=env,
+        )
         try:
-            http(
-                "POST",
-                "/api/voice/confirm",
-                data=json.dumps({"pendingToken": "invalid-token", "transcript": "테스트"}).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            raise AssertionError("expected gone for bad token")
-        except urllib.error.HTTPError as exc:
-            assert exc.code in {400, 410, 404}
+            wait_server()
+            admin = signup_admin(f"http://127.0.0.1:{PORT}", mail_file)
+            write_hdrs = auth_headers(admin)
+            REF_WAV.parent.mkdir(parents=True, exist_ok=True)
+            REF_TXT.write_text("기존 참조 텍스트\n", encoding="utf-8")
+            if REF_WAV.is_file():
+                REF_WAV.unlink()
+            make_upload_wav(REF_WAV, 8.0)
 
-    finally:
-        proc.terminate()
-        proc.wait(timeout=5)
+            with tempfile.TemporaryDirectory() as upload_tmp:
+                wav = Path(upload_tmp) / "upload.wav"
+                make_upload_wav(wav, 8.0)
+                res = http(
+                    "POST",
+                    "/api/voice/prepare",
+                    data=multipart_audio_only(wav),
+                    headers={
+                        "Content-Type": "multipart/form-data; boundary=----storyvoice",
+                        **write_hdrs,
+                    },
+                )
+                assert res.status == 200
+                prep = json.loads(res.read().decode())
+                assert prep.get("pendingToken")
+                assert prep.get("transcript") == short_asr
+                assert REF_TXT.read_text(encoding="utf-8").startswith("기존")
+
+                confirm_body = json.dumps(
+                    {"pendingToken": prep["pendingToken"], "transcript": short_asr},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                res2 = http(
+                    "POST",
+                    "/api/voice/confirm",
+                    data=confirm_body,
+                    headers={"Content-Type": "application/json", **write_hdrs},
+                )
+                assert res2.status == 200
+                assert REF_TXT.read_text(encoding="utf-8").strip() == short_asr
+                assert REF_WAV.is_file()
+                history = list((ROOT / "data" / "voice" / "history").glob("*"))
+                assert history, "expected backup dir"
+
+            try:
+                http(
+                    "POST",
+                    "/api/voice/confirm",
+                    data=json.dumps({"pendingToken": "invalid-token", "transcript": "테스트"}).encode(),
+                    headers={"Content-Type": "application/json", **write_hdrs},
+                )
+                raise AssertionError("expected gone for bad token")
+            except urllib.error.HTTPError as exc:
+                assert exc.code in {400, 410, 404}
+
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
 
 
 def test_confirm_rejects_long_text_for_short_audio() -> None:
@@ -173,38 +181,49 @@ def test_confirm_rejects_long_text_for_short_audio() -> None:
 
 
 def test_prepare_blocked_during_generation() -> None:
-    env = os.environ.copy()
-    env["STORY_VOICE_GENERATOR"] = "fake"
-    env["STORY_VOICE_VOICE_ASR"] = "fake"
-    env["STORY_VOICE_FAKE_CHUNK_DELAY"] = "30"
-    env["STORY_VOICE_FAKE_ASR_TEXT"] = "테스트"
-    proc = subprocess.Popen(
-        [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
-        cwd=ROOT,
-        env=env,
-    )
-    try:
-        wait_server()
-        http("POST", "/api/generation/story/ui-joeun-hyeongje")
-        time.sleep(0.5)
-        with tempfile.TemporaryDirectory() as tmp:
-            wav = Path(tmp) / "v.wav"
-            make_upload_wav(wav, 8.0)
-            try:
-                http(
-                    "POST",
-                    "/api/voice/prepare",
-                    data=multipart_audio_only(wav),
-                    headers={"Content-Type": "multipart/form-data; boundary=----storyvoice"},
-                )
-                raise AssertionError("expected 409 during generation")
-            except urllib.error.HTTPError as exc:
-                assert exc.code == 409
-                err = json.loads(exc.read().decode())
-                assert err.get("code") == "generation_busy"
-    finally:
-        proc.terminate()
-        proc.wait(timeout=5)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        mail_file = tmp_path / "mail.jsonl"
+        env = test_server_env(tmp_path / "auth.db", mail_file)
+        env["STORY_VOICE_VOICE_ASR"] = "fake"
+        env["STORY_VOICE_FAKE_CHUNK_DELAY"] = "30"
+        env["STORY_VOICE_FAKE_ASR_TEXT"] = "테스트"
+        proc = subprocess.Popen(
+            [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
+            cwd=ROOT,
+            env=env,
+        )
+        try:
+            wait_server()
+            admin = signup_admin(f"http://127.0.0.1:{PORT}", mail_file)
+            write_hdrs = auth_headers(admin)
+            http(
+                "POST",
+                "/api/generation/story/ui-joeun-hyeongje",
+                headers=write_hdrs,
+            )
+            time.sleep(0.5)
+            with tempfile.TemporaryDirectory() as upload_tmp:
+                wav = Path(upload_tmp) / "v.wav"
+                make_upload_wav(wav, 8.0)
+                try:
+                    http(
+                        "POST",
+                        "/api/voice/prepare",
+                        data=multipart_audio_only(wav),
+                        headers={
+                            "Content-Type": "multipart/form-data; boundary=----storyvoice",
+                            **write_hdrs,
+                        },
+                    )
+                    raise AssertionError("expected 409 during generation")
+                except urllib.error.HTTPError as exc:
+                    assert exc.code == 409
+                    err = json.loads(exc.read().decode())
+                    assert err.get("code") == "generation_busy"
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
 
 
 def main() -> int:

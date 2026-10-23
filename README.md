@@ -88,15 +88,58 @@ python scripts/serve.py
 # 집 Wi‑Fi에서 포트 직접 열기: python scripts/serve.py --host 0.0.0.0
 ```
 
-- **이야기** 탭: 재생, **다시 만들기**, **전체 다시 만들기**
-- **목소리** 탭: 녹음/업로드, 받아쓰기, 저장
+- **이야기** 탭: 재생, **다시 만들기**, **전체 다시 만들기** (다시 만들기는 **운영자**만)
+- **목소리** 탭: 녹음/업로드, 받아쓰기, 저장 (**운영자**만; 회원은 듣기만)
+- 헤더: **로그인** / **회원가입** (가족용 한국어 UI). 세션은 HttpOnly 쿠키 `sv_session`.
 - 생성은 서버 안 **단일 워커**(MLX 모델 1회 로드, 작업 1개씩, 대기열 최대 2). 새 `.m4a`는 임시 파일에 만든 뒤 `rename`으로 교체해 재생 중 끊김을 줄입니다. 완료 후 카탈로그·오디오 화이트리스트를 **재시작 없이** 갱신합니다.
-- 로그인 없음. IP당 요청 제한·업로드/대기열 상한 (`CF-Connecting-IP` 지원). 공개 URL은 운영자 선택입니다.
+- IP당 요청 제한·업로드/대기열 상한 (`CF-Connecting-IP` 지원). 공개 URL은 운영자 선택입니다.
 
-Linux/CI에서 HTTP·대기열·ffmpeg만 검증:
+#### 계정·권한
+
+| 구분 | 설명 |
+|------|------|
+| **회원** | 이야기 재생·다운로드 |
+| **운영자** | 목소리 저장, 이야기 다시 만들기 (첫 가입자 또는 `STORY_VOICE_ADMIN_EMAILS`에 있는 이메일) |
+
+SQLite: `data/story_voice.db` (git 제외). 비밀번호는 scrypt.
+
+**API (JSON, 쿠키 세션 + CSRF)**
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/api/config` | `csrfToken`, `authEmailDevMode`, 정적 `assetVersions` |
+| GET | `/api/users/nickname-available?nickname=` | 닉네임 중복 (`^[a-zA-Z0-9_가-힣]{2,12}$`) |
+| POST | `/api/users/signup/send-verification` | 이메일 인증코드 (Resend, 60초 재전송 쿨다운) |
+| POST | `/api/users/signup` | 가입 (`loginId`, `nickname`, `password`, `verificationCode`) |
+| POST | `/api/auth/login` | 로그인 → 세션 쿠키 |
+| POST | `/api/auth/logout` | 로그아웃 |
+| GET | `/api/auth/me` | 현재 사용자 (`user` 또는 `null`) |
+
+쓰기 API(목소리·생성)는 운영자 세션 + `X-CSRF-Token` 필요. 미로그인 401, 회원 403.
+
+**환경 변수 (메일·세션)**
 
 ```bash
+# 필수 (프로덕션): STORY_VOICE_PRODUCTION=1 이면 반드시 설정
+export STORY_VOICE_SESSION_SECRET="$(openssl rand -base64 48)"
+
+# Resend (baem.app 도메인 인증됨). 키 없으면 서버 로그에 코드만 출력
+export RESEND_API_KEY="re_..."
+export STORY_VOICE_MAIL_FROM='Story Voice <noreply@baem.app>'   # 기본값 동일
+export STORY_VOICE_MAIL_MODE=resend   # resend | log
+
+# 운영자 이메일 (쉼표 구분, 첫 사용자는 자동 운영자)
+export STORY_VOICE_ADMIN_EMAILS="you@example.com"
+```
+
+개발만: `STORY_VOICE_SESSION_SECRET` 없으면 `data/.session_secret`에 자동 생성 (gitignore).
+
+Linux/CI에서 HTTP·대기열·ffmpeg·인증 검증:
+
+```bash
+python scripts/test_auth_flow.py
 python scripts/test_generation_flow.py   # STORY_VOICE_GENERATOR=fake
+python scripts/test_voice_upload_flow.py
 ```
 
 ### 6. Mac mini 배포 (launchd + Tunnel)
@@ -150,4 +193,4 @@ Qwen3-TTS 12Hz Base를 쓴다. Apple Silicon용 MLX로 로컬에서 돌린다.
 
 ## 통과한 다음
 
-얇은 제품으로 간다. 목소리 하나, 이야기 몇 편, 재생 버튼만 있는 웹 화면이면 충분하다. 계정, 결제, 학습 콘텐츠는 그 뒤에 둔다.
+계정(가족 로그인)은 웹에 들어갔다. 결제·학습 콘텐츠는 그 뒤에 둔다.
