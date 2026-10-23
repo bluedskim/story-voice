@@ -92,6 +92,16 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 
 대사 청크 처리 순서: 페이드 인 → (선택) 피치/게인 → EQ → **입력 평균 음량에 맞춤** → 피크 리미터 (`alimiter`, 약 -1 dBFS) → 페이드 아웃.
 
+**이야기 전체 마무리**
+
+| 환경 변수 | 설명 |
+|-----------|------|
+| `STORY_VOICE_LOUDNORM` | 완성본 concat **후** ffmpeg `loudnorm` 2-pass (기본 `1`) |
+| `STORY_VOICE_LOUDNORM_I` | 통합 LUFS 목표 (기본 `-16`) — 대사 EQ 상대 밸런스는 유지 |
+| `STORY_VOICE_ASR_VERIFY` | 청크 ASR 검증·재시도 (기본 `0`, opt-in). CER 0.18, 최대 2회, 50%↑ 실패 시 일괄 재시도 생략 |
+
+참조 음성은 이야기당 한 번 로드합니다. ASR 검증 시 TTS/ASR 모델은 16GB급 메모리를 위해 번갈아 로드합니다.
+
 ### 5. 웹 플레이어 + 다시 만들기
 
 ```bash
