@@ -19,6 +19,8 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from test_auth_helpers import auth_headers, signup_admin, test_server_env
+
 PORT = 18765
 
 
@@ -132,138 +134,154 @@ def test_download_filename_helpers() -> None:
 def main() -> int:
     test_download_filename_helpers()
 
-    os.environ["STORY_VOICE_GENERATOR"] = "fake"
-    env = os.environ.copy()
-    env["STORY_VOICE_VOICE_ASR"] = "fake"
-    short = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()[:60]
-    env["STORY_VOICE_FAKE_ASR_TEXT"] = short
-    proc = subprocess.Popen(
-        [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
-        cwd=ROOT,
-        env=env,
-    )
-    try:
-        wait_server()
-
-        from http_utils import parse_multipart_body
-
-        script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
-        parsed = parse_multipart_body(
-            multipart_upload(script, b"hello", "x.txt", "text/plain"),
-            "multipart/form-data; boundary=----storyvoice",
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        db = tmp_path / "auth.db"
+        mail_file = tmp_path / "mail.jsonl"
+        env = test_server_env(db, mail_file)
+        env["STORY_VOICE_VOICE_ASR"] = "fake"
+        short = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()[:60]
+        env["STORY_VOICE_FAKE_ASR_TEXT"] = short
+        proc = subprocess.Popen(
+            [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
+            cwd=ROOT,
+            env=env,
         )
-        assert parsed and parsed.get("transcript") == script
-
         try:
-            http(
-                "POST",
-                "/api/voice/prepare",
-                data=multipart_upload(script, b"not audio", "x.bin", "application/octet-stream"),
-                headers={"Content-Type": "multipart/form-data; boundary=----storyvoice"},
+            wait_server()
+            admin = signup_admin(f"http://127.0.0.1:{PORT}", mail_file)
+            write_hdrs = auth_headers(admin)
+
+            from http_utils import parse_multipart_body
+
+            script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
+            parsed = parse_multipart_body(
+                multipart_upload(script, b"hello", "x.txt", "text/plain"),
+                "multipart/form-data; boundary=----storyvoice",
             )
-            raise AssertionError("expected 400 for non-audio")
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 400
-            err = json.loads(exc.read().decode())
-            assert err.get("code") == "invalid_audio"
+            assert parsed and parsed.get("transcript") == script
 
-        try:
-            http("POST", "/api/generation/story/does-not-exist")
-            raise AssertionError("expected 404")
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 404
+            try:
+                http(
+                    "POST",
+                    "/api/voice/prepare",
+                    data=multipart_upload(script, b"not audio", "x.bin", "application/octet-stream"),
+                    headers={
+                        "Content-Type": "multipart/form-data; boundary=----storyvoice",
+                        **write_hdrs,
+                    },
+                )
+                raise AssertionError("expected 400 for non-audio")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 400
+                err = json.loads(exc.read().decode())
+                assert err.get("code") == "invalid_audio"
 
-        # Voice prepare + confirm (fake ASR)
-        with tempfile.TemporaryDirectory() as tmp:
-            wav = Path(tmp) / "voice.wav"
-            make_upload_wav(wav, 8.0)
-            prep_body = multipart_audio_only(wav)
+            try:
+                http("POST", "/api/generation/story/does-not-exist", headers=write_hdrs)
+                raise AssertionError("expected 404")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 404
+
+            with tempfile.TemporaryDirectory() as wav_tmp:
+                wav = Path(wav_tmp) / "voice.wav"
+                make_upload_wav(wav, 8.0)
+                prep_body = multipart_audio_only(wav)
+                res = http(
+                    "POST",
+                    "/api/voice/prepare",
+                    data=prep_body,
+                    headers={
+                        "Content-Type": "multipart/form-data; boundary=----storyvoice",
+                        **write_hdrs,
+                    },
+                )
+                assert res.status == 200
+                prep = json.loads(res.read().decode())
+                confirm = json.dumps(
+                    {"pendingToken": prep["pendingToken"], "transcript": short},
+                    ensure_ascii=False,
+                ).encode()
+                res = http(
+                    "POST",
+                    "/api/voice/confirm",
+                    data=confirm,
+                    headers={"Content-Type": "application/json", **write_hdrs},
+                )
+                assert res.status == 200
+
+            ref = ROOT / "data" / "voice" / "reference.wav"
+            assert ref.is_file(), "reference.wav missing"
+
             res = http(
                 "POST",
-                "/api/voice/prepare",
-                data=prep_body,
-                headers={"Content-Type": "multipart/form-data; boundary=----storyvoice"},
+                "/api/generation/story/ui-joeun-hyeongje",
+                headers=write_hdrs,
             )
-            assert res.status == 200
-            prep = json.loads(res.read().decode())
-            confirm = json.dumps(
-                {"pendingToken": prep["pendingToken"], "transcript": short},
-                ensure_ascii=False,
-            ).encode()
-            res = http(
+            assert res.status == 202
+            first = json.loads(res.read().decode())
+            job_id = first["job"]["jobId"]
+
+            res2 = http(
                 "POST",
-                "/api/voice/confirm",
-                data=confirm,
-                headers={"Content-Type": "application/json"},
+                "/api/generation/story/ui-joeun-hyeongje",
+                headers=write_hdrs,
             )
+            dup = json.loads(res2.read().decode())
+            assert dup.get("deduplicated") is True
+            assert dup["job"]["jobId"] == job_id
+
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                st = json.loads(http("GET", "/api/generation/status").read().decode())
+                recent = st.get("recent") or []
+                if recent and recent[0].get("state") == "done":
+                    break
+                if recent and recent[0].get("state") == "failed":
+                    raise AssertionError(recent[0].get("error"))
+                time.sleep(0.3)
+            else:
+                raise AssertionError("generation timed out")
+
+            out = ROOT / "data" / "audio" / "ui-joeun-hyeongje.m4a"
+            assert out.is_file(), "output m4a missing"
+
+            cat = json.loads(http("GET", "/catalog.json").read().decode())
+            assert any(s["id"] == "ui-joeun-hyeongje" and s["hasAudio"] for s in cat["stories"])
+
+            res = http("GET", "/audio/ui-joeun-hyeongje.m4a", headers={"Range": "bytes=0-99"})
+            assert res.status == 206, res.status
+            assert res.headers.get("Content-Type") == "audio/mp4"
+            assert res.headers.get("Content-Disposition") is None
+
+            res = http("GET", "/audio/ui-joeun-hyeongje.m4a?download=1")
             assert res.status == 200
+            cd = res.headers.get("Content-Disposition", "")
+            assert "attachment" in cd
+            assert "filename*=" in cd
+            assert "UTF-8''" in cd
+            assert "의좋은" in cd or "%EC%9D%98" in cd
 
-        ref = ROOT / "data" / "voice" / "reference.wav"
-        assert ref.is_file(), "reference.wav missing"
+            try:
+                http("GET", "/audio/does-not-exist.m4a?download=1")
+                raise AssertionError("expected 404 for unknown download")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 404
 
-        # Enqueue one story
-        res = http("POST", "/api/generation/story/ui-joeun-hyeongje")
-        assert res.status == 202
-        first = json.loads(res.read().decode())
-        job_id = first["job"]["jobId"]
+            try:
+                http("GET", "/audio/")
+                raise AssertionError("expected 404 for /audio/")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 404
 
-        res2 = http("POST", "/api/generation/story/ui-joeun-hyeongje")
-        dup = json.loads(res2.read().decode())
-        assert dup.get("deduplicated") is True
-        assert dup["job"]["jobId"] == job_id
-
-        deadline = time.time() + 60
-        while time.time() < deadline:
-            st = json.loads(http("GET", "/api/generation/status").read().decode())
-            recent = st.get("recent") or []
-            if recent and recent[0].get("state") == "done":
-                break
-            if recent and recent[0].get("state") == "failed":
-                raise AssertionError(recent[0].get("error"))
-            time.sleep(0.3)
-        else:
-            raise AssertionError("generation timed out")
-
-        out = ROOT / "data" / "audio" / "ui-joeun-hyeongje.m4a"
-        assert out.is_file(), "output m4a missing"
-
-        # Catalog whitelist refresh (no restart)
-        cat = json.loads(http("GET", "/catalog.json").read().decode())
-        assert any(s["id"] == "ui-joeun-hyeongje" and s["hasAudio"] for s in cat["stories"])
-
-        res = http("GET", "/audio/ui-joeun-hyeongje.m4a", headers={"Range": "bytes=0-99"})
-        assert res.status == 206, res.status
-        assert res.headers.get("Content-Type") == "audio/mp4"
-        assert res.headers.get("Content-Disposition") is None
-
-        res = http("GET", "/audio/ui-joeun-hyeongje.m4a?download=1")
-        assert res.status == 200
-        cd = res.headers.get("Content-Disposition", "")
-        assert "attachment" in cd
-        assert "filename*=" in cd
-        assert "UTF-8''" in cd
-        assert "의좋은" in cd or "%EC%9D%98" in cd
-
-        try:
-            http("GET", "/audio/does-not-exist.m4a?download=1")
-            raise AssertionError("expected 404 for unknown download")
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 404
-
-        try:
-            http("GET", "/audio/")
-            raise AssertionError("expected 404 for /audio/")
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 404
-
-        print(
-            "OK: download filenames, multipart, bad upload 400, unknown story 404, dedupe, "
-            "voice upload, fake generation, range playback vs download disposition, no listing"
-        )
-        return 0
-    finally:
-        proc.terminate()
-        proc.wait(timeout=5)
+            print(
+                "OK: download filenames, multipart, bad upload 400, unknown story 404, dedupe, "
+                "voice upload, fake generation, range playback vs download disposition, no listing"
+            )
+            return 0
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
 
 
 if __name__ == "__main__":

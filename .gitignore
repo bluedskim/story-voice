@@ -1,3 +1,8 @@
+# Local auth DB
+data/story_voice.db
+data/story_voice.db-*
+data/.session_secret
+
 # Local voice data (never commit recordings)
 data/voice/*
 !data/voice/README.md

@@ -23,9 +23,19 @@
 
     <div class="app">
       <header class="header">
-        <p class="eyebrow">story-voice</p>
-        <h1>잠자리 이야기</h1>
-        <p class="subtitle">엄마·아빠 목소리로 듣는 동화</p>
+        <div class="header-top">
+          <div>
+            <p class="eyebrow">story-voice</p>
+            <h1>잠자리 이야기</h1>
+            <p class="subtitle">엄마·아빠 목소리로 듣는 동화</p>
+          </div>
+          <nav class="auth-bar" id="auth-bar" aria-label="계정">
+            <span id="auth-user-label" class="auth-user" hidden></span>
+            <button type="button" id="auth-login-btn" class="btn btn-secondary btn-sm">로그인</button>
+            <button type="button" id="auth-signup-btn" class="btn btn-secondary btn-sm">회원가입</button>
+            <button type="button" id="auth-logout-btn" class="btn btn-secondary btn-sm" hidden>로그아웃</button>
+          </nav>
+        </div>
       </header>
 
       <nav class="tabs" aria-label="메뉴">
@@ -51,6 +61,9 @@
       </section>
 
       <section id="panel-voice" class="panel" hidden>
+        <p id="voice-auth-gate" class="auth-gate card" hidden>
+          로그인하면 목소리를 저장할 수 있어요. 가족 관리자만 저장·이야기 만들기를 할 수 있습니다.
+        </p>
         <ol class="voice-steps" aria-label="목소리 저장 단계">
           <li class="voice-step is-active" data-step="1">
             <span class="voice-step-num">1</span>
@@ -137,6 +150,45 @@
       </div>
       <button type="button" id="np-play" class="np-play" aria-label="일시정지">⏸</button>
     </aside>
+
+    <dialog id="modal-login" class="auth-modal" hidden>
+      <form id="login-form" class="auth-form card">
+        <h2 class="auth-title">로그인</h2>
+        <label class="field-label" for="login-email">이메일</label>
+        <input id="login-email" class="field-input" type="email" autocomplete="email" required />
+        <label class="field-label" for="login-password">비밀번호</label>
+        <input id="login-password" class="field-input" type="password" autocomplete="current-password" required />
+        <p id="login-error" class="auth-msg error" role="alert"></p>
+        <button type="submit" class="btn btn-primary btn-wide">로그인</button>
+        <button type="button" id="login-to-signup" class="btn btn-secondary btn-wide">회원가입</button>
+        <button type="button" class="btn btn-secondary btn-wide" data-close-modal>닫기</button>
+      </form>
+    </dialog>
+
+    <dialog id="modal-signup" class="auth-modal" hidden>
+      <form id="signup-form" class="auth-form card">
+        <h2 class="auth-title">회원가입</h2>
+        <label class="field-label" for="signup-email">이메일</label>
+        <input id="signup-email" class="field-input" type="email" autocomplete="email" required />
+        <label class="field-label" for="signup-nickname">닉네임</label>
+        <input id="signup-nickname" class="field-input" type="text" maxlength="12" required />
+        <p id="signup-nickname-status" class="auth-nick" aria-live="polite"></p>
+        <button type="button" id="signup-send-code" class="btn btn-secondary btn-wide">인증코드 보내기</button>
+        <p id="signup-dev-hint" class="auth-msg" hidden></p>
+        <div id="signup-code-wrap" hidden>
+          <label class="field-label" for="signup-code">인증코드 (6자리)</label>
+          <input id="signup-code" class="field-input" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" />
+        </div>
+        <label class="field-label" for="signup-password">비밀번호</label>
+        <input id="signup-password" class="field-input" type="password" autocomplete="new-password" minlength="8" required />
+        <label class="field-label" for="signup-password2">비밀번호 확인</label>
+        <input id="signup-password2" class="field-input" type="password" autocomplete="new-password" minlength="8" required />
+        <p id="signup-error" class="auth-msg error" role="alert"></p>
+        <button type="submit" class="btn btn-primary btn-wide">가입하기</button>
+        <button type="button" id="signup-to-login" class="btn btn-secondary btn-wide">로그인으로</button>
+        <button type="button" class="btn btn-secondary btn-wide" data-close-modal>닫기</button>
+      </form>
+    </dialog>
 
     <audio id="player" preload="metadata"></audio>
     <script src="app.js" type="module"></script>

@@ -24,7 +24,30 @@ from download_filenames import (
     download_basename,
 )
 from generation_service import EnqueueResult, GenerationService, JobState, StoryNotFoundError
-from http_utils import client_ip, parse_multipart, read_json_body, send_json
+from auth_csrf import CSRF_COOKIE, CSRF_HEADER, new_csrf_token, parse_cookies, validate_csrf
+from auth_db import AuthDatabase
+from auth_config import ensure_session_secret
+from auth_email import is_log_mail_mode
+from static_assets import inject_asset_versions, web_asset_versions
+from auth_service import (
+    AuthError,
+    login,
+    logout,
+    nickname_available,
+    send_verification,
+    signup,
+    user_from_session,
+    user_public,
+)
+from http_utils import (
+    client_ip,
+    cookie_secure_flag,
+    make_csrf_cookie,
+    make_session_cookie,
+    parse_multipart,
+    read_json_body,
+    send_json,
+)
 from rate_limit import RateLimiter
 from story_catalog import write_manifest
 from voice_service import (
@@ -47,8 +70,11 @@ STATIC_FILES = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+    "/auth.js": ("auth.js", "application/javascript; charset=utf-8"),
     "/catalog.json": ("catalog.json", "application/json; charset=utf-8"),
 }
+
+ASSET_VERSIONS = web_asset_versions()
 
 STORY_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -90,6 +116,7 @@ class AppState:
         self.lock = threading.Lock()
         self.allowed_audio_ids: set[str] = set()
         self.story_titles: dict[str, str] = {}
+        self.auth_db = AuthDatabase()
 
         def refresh() -> None:
             write_manifest(MANIFEST_PATH)
@@ -101,11 +128,55 @@ class AppState:
 
 
 class StoryVoiceHandler(BaseHTTPRequestHandler):
-    server_version = "story-voice/2.0"
+    server_version = "story-voice/3.0"
 
     @property
     def app(self) -> AppState:
         return self.server.app_state  # type: ignore[attr-defined]
+
+    def _session_token(self) -> str | None:
+        return parse_cookies(self).get("sv_session")
+
+    def _current_user(self):
+        return user_from_session(self.app.auth_db, self._session_token())
+
+    def _ensure_csrf(self) -> bool:
+        if not validate_csrf(self):
+            send_json(
+                self,
+                HTTPStatus.FORBIDDEN,
+                {"error": "요청을 확인할 수 없어요. 페이지를 새로고침해 주세요.", "code": "csrf_failed"},
+            )
+            return False
+        return True
+
+    def _require_admin_write(self):
+        user = self._current_user()
+        if not user:
+            send_json(
+                self,
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "로그인이 필요해요.", "code": "auth_required"},
+            )
+            return None
+        if not user.is_admin:
+            send_json(
+                self,
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "가족 목소리 저장·이야기 만들기는 관리자만 할 수 있어요.",
+                    "code": "forbidden",
+                },
+            )
+            return None
+        return user
+
+    def _csrf_token_for_config(self) -> str:
+        cookies = parse_cookies(self)
+        token = cookies.get(CSRF_COOKIE)
+        if not token:
+            token = new_csrf_token()
+        return token
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -114,18 +185,44 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             route = route.rstrip("/")
 
         if route == "/api/config":
+            csrf = self._csrf_token_for_config()
+            user = self._current_user()
             send_json(
                 self,
                 HTTPStatus.OK,
                 {
                     "recordScript": default_record_script(),
+                    "csrfToken": csrf,
+                    "authEmailDevMode": is_log_mail_mode(),
+                    "assetVersions": ASSET_VERSIONS,
                     "limits": {
                         "minDurationSec": MIN_DURATION_SEC,
                         "maxDurationSec": MAX_DURATION_SEC,
                         "maxUploadBytes": MAX_UPLOAD_BYTES,
                     },
+                    "user": user_public(user) if user else None,
                 },
+                set_cookies=[make_csrf_cookie(csrf, self)],
             )
+            return
+
+        if route == "/api/auth/me":
+            user = self._current_user()
+            if not user:
+                send_json(self, HTTPStatus.OK, {"user": None})
+                return
+            send_json(self, HTTPStatus.OK, {"user": user_public(user)})
+            return
+
+        if route == "/api/users/nickname-available":
+            query = parse_qs(parsed.query)
+            nickname = (query.get("nickname") or [""])[0].strip()
+            try:
+                available = nickname_available(self.app.auth_db, nickname) if nickname else False
+            except AuthError as exc:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "available": False})
+                return
+            send_json(self, HTTPStatus.OK, {"available": available})
             return
 
         if route == "/api/voice":
@@ -142,8 +239,31 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             if file_path is None or not file_path.is_file():
                 self._send_error(HTTPStatus.NOT_FOUND)
                 return
+            if filename == "index.html":
+                html = inject_asset_versions(file_path.read_text(encoding="utf-8"), ASSET_VERSIONS)
+                body = html.encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             self._send_file(file_path, content_type)
             return
+
+        if route.startswith("/styles.css") or route.startswith("/app.js") or route.startswith("/auth.js"):
+            base = route.split("?", 1)[0].lstrip("/")
+            if base in {"styles.css", "app.js", "auth.js"}:
+                file_path = _safe_resolve(WEB_DIR, base)
+                if file_path and file_path.is_file():
+                    ctype = (
+                        "text/css; charset=utf-8"
+                        if base.endswith(".css")
+                        else "application/javascript; charset=utf-8"
+                    )
+                    self._send_file(file_path, ctype)
+                    return
 
         if route.startswith("/audio/"):
             query = parse_qs(parsed.query)
@@ -158,16 +278,107 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         route = unquote(parsed.path)
         ip = client_ip(self)
 
+        if route == "/api/users/signup/send-verification":
+            if not self._ensure_csrf():
+                return
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
+            login_id = (body.get("loginId") or body.get("email") or "").strip()
+            try:
+                send_verification(self.app.auth_db, login_id, ip)
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self.end_headers()
+            except AuthError as exc:
+                payload = {"error": str(exc), "code": exc.code}
+                if exc.retry_after_sec is not None:
+                    payload["retryAfterSec"] = exc.retry_after_sec
+                send_json(self, HTTPStatus(exc.status), payload)
+            return
+
+        if route == "/api/users/signup":
+            if not self._ensure_csrf():
+                return
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
+            try:
+                user = signup(
+                    self.app.auth_db,
+                    (body.get("loginId") or body.get("email") or "").strip(),
+                    (body.get("nickname") or "").strip(),
+                    body.get("password") or "",
+                    (body.get("verificationCode") or "").strip(),
+                    ip,
+                )
+                send_json(self, HTTPStatus.CREATED, {"user": user_public(user)})
+            except AuthError as exc:
+                send_json(self, HTTPStatus(exc.status), {"error": str(exc), "code": exc.code})
+            return
+
+        if route == "/api/auth/login":
+            if not self._ensure_csrf():
+                return
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
+            try:
+                token, user = login(
+                    self.app.auth_db,
+                    (body.get("loginId") or body.get("email") or "").strip(),
+                    body.get("password") or "",
+                )
+                csrf = self._csrf_token_for_config()
+                send_json(
+                    self,
+                    HTTPStatus.OK,
+                    {"accessToken": token, "user": user_public(user)},
+                    set_cookies=[
+                        make_session_cookie(token, self),
+                        make_csrf_cookie(csrf, self),
+                    ],
+                )
+            except AuthError as exc:
+                send_json(self, HTTPStatus(exc.status), {"error": str(exc), "code": exc.code})
+            return
+
+        if route == "/api/auth/logout":
+            if not self._ensure_csrf():
+                return
+            logout(self.app.auth_db, self._session_token())
+            secure = cookie_secure_flag(self)
+            send_json(
+                self,
+                HTTPStatus.OK,
+                {"ok": True},
+                set_cookies=[
+                    f"sv_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure}",
+                    f"sv_csrf=; Path=/; SameSite=Lax; Max-Age=0{secure}",
+                ],
+            )
+            return
+
         if route == "/api/voice/prepare":
             if not voice_rate.allow(ip):
                 send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해 주세요."})
+                return
+            if not self._ensure_csrf():
+                return
+            if self._require_admin_write() is None:
                 return
             self._handle_voice_prepare()
             return
 
         if route == "/api/voice/confirm":
             if not voice_rate.allow(ip):
-                send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해 주세요."})
+                send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많어요. 잠시 후 다시 시도해 주세요."})
+                return
+            if not self._ensure_csrf():
+                return
+            if self._require_admin_write() is None:
                 return
             self._handle_voice_confirm()
             return
@@ -188,6 +399,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             if not gen_rate.allow(ip):
                 send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요."})
                 return
+            if not self._ensure_csrf():
+                return
+            if self._require_admin_write() is None:
+                return
             try:
                 result = self.app.generation.enqueue_story(story_id)
                 self._send_enqueue_result(result)
@@ -200,6 +415,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         if route == "/api/generation/all":
             if not gen_rate.allow(ip):
                 send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요."})
+                return
+            if not self._ensure_csrf():
+                return
+            if self._require_admin_write() is None:
                 return
             try:
                 result = self.app.generation.enqueue_all()
@@ -399,6 +618,8 @@ def main() -> None:
 
     if args.generator:
         os.environ["STORY_VOICE_GENERATOR"] = args.generator
+
+    ensure_session_secret()
 
     WEB_DIR.mkdir(parents=True, exist_ok=True)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
