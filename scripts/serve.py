@@ -66,14 +66,23 @@ AUDIO_DIR = ROOT / "data" / "audio"
 MANIFEST_PATH = WEB_DIR / "catalog.json"
 
 STATIC_FILES = {
-    "/": ("index.html", "text/html; charset=utf-8"),
-    "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
     "/auth.js": ("auth.js", "application/javascript; charset=utf-8"),
     "/catalog.json": ("catalog.json", "application/json; charset=utf-8"),
+    "/favicon.ico": ("favicon.ico", "image/x-icon"),
+    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json; charset=utf-8"),
+    "/icons/favicon.svg": ("icons/favicon.svg", "image/svg+xml"),
+    "/icons/icon-16.png": ("icons/icon-16.png", "image/png"),
+    "/icons/icon-32.png": ("icons/icon-32.png", "image/png"),
+    "/icons/icon-48.png": ("icons/icon-48.png", "image/png"),
+    "/icons/icon-180.png": ("icons/icon-180.png", "image/png"),
+    "/icons/icon-192.png": ("icons/icon-192.png", "image/png"),
+    "/icons/icon-512.png": ("icons/icon-512.png", "image/png"),
 }
 
+INJECTED_HTML_ROUTES = {"/", "/index.html"}
+INJECTED_TEXT_ROUTES = {"/manifest.webmanifest"}
 ASSET_VERSIONS = web_asset_versions()
 
 STORY_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -233,27 +242,52 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, self.app.generation.status_snapshot())
             return
 
-        if route in STATIC_FILES:
-            filename, content_type = STATIC_FILES[route]
+        base_route = route.split("?", 1)[0]
+        if base_route in INJECTED_HTML_ROUTES:
+            file_path = _safe_resolve(WEB_DIR, "index.html")
+            if file_path is None or not file_path.is_file():
+                self._send_error(HTTPStatus.NOT_FOUND)
+                return
+            versions = web_asset_versions()
+            body = inject_asset_versions(file_path.read_text(encoding="utf-8"), versions).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if base_route in INJECTED_TEXT_ROUTES:
+            file_path = _safe_resolve(WEB_DIR, "manifest.webmanifest")
+            if file_path is None or not file_path.is_file():
+                self._send_error(HTTPStatus.NOT_FOUND)
+                return
+            versions = web_asset_versions()
+            body = inject_asset_versions(file_path.read_text(encoding="utf-8"), versions).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/manifest+json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if base_route in STATIC_FILES:
+            filename, content_type = STATIC_FILES[base_route]
             file_path = _safe_resolve(WEB_DIR, filename)
             if file_path is None or not file_path.is_file():
                 self._send_error(HTTPStatus.NOT_FOUND)
                 return
-            if filename == "index.html":
-                html = inject_asset_versions(file_path.read_text(encoding="utf-8"), ASSET_VERSIONS)
-                body = html.encode("utf-8")
-                self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
-                return
             self._send_file(file_path, content_type)
             return
 
-        if route.startswith("/styles.css") or route.startswith("/app.js") or route.startswith("/auth.js"):
-            base = route.split("?", 1)[0].lstrip("/")
+        if (
+            base_route.startswith("/styles.css")
+            or base_route.startswith("/app.js")
+            or base_route.startswith("/auth.js")
+        ):
+            base = base_route.split("?", 1)[0].lstrip("/")
             if base in {"styles.css", "app.js", "auth.js"}:
                 file_path = _safe_resolve(WEB_DIR, base)
                 if file_path and file_path.is_file():
