@@ -61,11 +61,61 @@ def read_story_text(story_path: Path, catalog_mode: bool = True) -> str:
     return story_body_from_path(story_path)
 
 
+def post_process_chunk_wav(
+    chunk_path: Path,
+    role: str,
+    sr: int,
+    dialogue_style: bool,
+) -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from audio_post import apply_dialogue_style, apply_narration_loudnorm_if_enabled
+    from audio_quality_config import dialogue_post_should_run
+
+    if role == "dialogue" and dialogue_style and dialogue_post_should_run():
+        styled = chunk_path.with_name(chunk_path.stem + "_styled.wav")
+        apply_dialogue_style(chunk_path, styled, sr)
+        styled.replace(chunk_path)
+    elif role == "narration":
+        apply_narration_loudnorm_if_enabled(chunk_path, sr)
+
+
+def synthesize_chunk_to_wav(
+    model,
+    chunk: tuple[str, str, str],
+    voice_ref,
+    lang: str,
+    temperature: float | None,
+    out_path: Path,
+    dialogue_style: bool,
+) -> int:
+    import numpy as np
+    from mlx_audio import audio_io as sf
+
+    text, _pause_kind, role = chunk
+    kw: dict = dict(
+        text=text,
+        ref_audio=voice_ref.audio_array(),
+        ref_text=voice_ref.text,
+        lang_code=lang,
+    )
+    if temperature is not None:
+        kw["temperature"] = temperature
+    try:
+        results = list(model.generate(**kw))
+    except TypeError:
+        kw.pop("lang_code", None)
+        results = list(model.generate(**kw))
+    audio = np.concatenate([np.array(r.audio, dtype=np.float32).reshape(-1) for r in results])
+    sr = int(getattr(results[0], "sample_rate", getattr(model, "sample_rate", 24000)))
+    sf.write(str(out_path), audio, sr)
+    post_process_chunk_wav(out_path, role, sr, dialogue_style)
+    return sr
+
+
 def generate_chunks_to_wav(
     model,
     chunks: list[tuple[str, str, str]],
-    ref_audio: str | Path,
-    ref_text: str,
+    voice_ref,
     lang: str,
     tmpdir: str,
     sentence_pause: float,
@@ -73,50 +123,31 @@ def generate_chunks_to_wav(
     temperature: float | None,
     dialogue_style: bool = True,
     on_chunk: ChunkProgress | None = None,
-) -> tuple[list[str], int]:
-    import mlx.core as mx
-    import numpy as np
-    from mlx_audio import audio_io as sf
-
-    sys.path.insert(0, str(ROOT / "scripts"))
-    from audio_post import apply_dialogue_style, apply_narration_loudnorm_if_enabled
-    from audio_quality_config import dialogue_post_should_run
-
-    ref_audio_str = os.fspath(ref_audio)
+) -> tuple[list[str], int, float]:
     sr = getattr(model, "sample_rate", 24000)
     files: list[str] = []
+    t_tts = time.time()
 
-    for i, (chunk, pause_kind, role) in enumerate(chunks):
+    for i, chunk in enumerate(chunks):
         t1 = time.time()
-        kw: dict = dict(text=chunk, ref_audio=ref_audio_str, ref_text=ref_text, lang_code=lang)
-        if temperature is not None:
-            kw["temperature"] = temperature
-        try:
-            results = list(model.generate(**kw))
-        except TypeError:
-            kw.pop("lang_code", None)
-            results = list(model.generate(**kw))
-        audio = np.concatenate(
-            [np.array(r.audio, dtype=np.float32).reshape(-1) for r in results]
-        )
         f = os.path.join(tmpdir, f"chunk_{i:04d}.wav")
-        sf.write(f, audio, sr)
-        chunk_path = Path(f)
-        if role == "dialogue" and dialogue_style and dialogue_post_should_run():
-            styled = chunk_path.with_name(f"chunk_{i:04d}_styled.wav")
-            apply_dialogue_style(chunk_path, styled, sr)
-            styled.replace(chunk_path)
-        elif role == "narration":
-            apply_narration_loudnorm_if_enabled(chunk_path, sr)
+        sr = synthesize_chunk_to_wav(
+            model,
+            chunk,
+            voice_ref,
+            lang,
+            temperature,
+            Path(f),
+            dialogue_style,
+        )
         files.append(f)
+        text, _pause, role = chunk
         print(
-            f"[{i + 1}/{len(chunks)}] {len(audio) / sr:.1f}s audio in {time.time() - t1:.1f}s "
-            f"[{role}] :: {chunk[:40]}",
+            f"[{i + 1}/{len(chunks)}] TTS {time.time() - t1:.1f}s [{role}] :: {text[:40]}",
             file=sys.stderr,
         )
         if on_chunk:
             on_chunk(i + 1, len(chunks))
-        mx.clear_cache()
 
     sil_sentence = os.path.join(tmpdir, "silence_sentence.wav")
     sil_paragraph = os.path.join(tmpdir, "silence_paragraph.wav")
@@ -152,7 +183,7 @@ def generate_chunks_to_wav(
                 fh.write(f"file '{sil}'\n")
             fh.write(f"file '{f}'\n")
 
-    return files, sr
+    return files, sr, time.time() - t_tts
 
 
 def story_chunks_for_tts(story_text: str, max_chars: int) -> list[tuple[str, str, str]]:
@@ -162,31 +193,41 @@ def story_chunks_for_tts(story_text: str, max_chars: int) -> list[tuple[str, str
     return [(c.text, c.pause_after, c.role) for c in split_story_into_chunks(story_text, max_chars)]
 
 
+def ffmpeg_concat_wav(list_path: str, sr: int, out_wav: Path) -> None:
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            list_path,
+            "-ar",
+            str(sr),
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            os.fspath(out_wav),
+        ],
+        check=True,
+    )
+
+
 def ffmpeg_concat_to_out(list_path: str, sr: int, out_path: Path) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    suffix = out_path.suffix.lower()
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-loglevel",
-        "error",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        list_path,
-        "-ar",
-        str(sr),
-        "-ac",
-        "1",
-    ]
-    if suffix in {".m4a", ".mp4"}:
-        cmd.extend(["-c:a", "aac", "-b:a", "128k"])
-    elif suffix == ".mp3":
-        cmd.extend(["-c:a", "libmp3lame", "-q:a", "2"])
-    cmd.append(os.fspath(out_path))
-    subprocess.run(cmd, check=True)
+    """Concat chunks then final loudnorm + encode (tests / legacy callers)."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from audio_post import apply_final_loudnorm_if_enabled, encode_story_from_wav
+
+    tmp = Path(list_path).parent / "_concat_story.wav"
+    ffmpeg_concat_wav(list_path, sr, tmp)
+    apply_final_loudnorm_if_enabled(tmp)
+    encode_story_from_wav(tmp, out_path, sr)
 
 
 def narrate_story(
@@ -202,22 +243,30 @@ def narrate_story(
     dialogue_style: bool = True,
     keep_chunks: bool = False,
     on_progress: ChunkProgress | None = None,
+    narration_config=None,
+    tts_session=None,
 ) -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from audio_post import apply_final_loudnorm_if_enabled, encode_story_from_wav
+    from story_narration import VoiceReference, default_narration_config, run_asr_verification
+
+    cfg = narration_config or default_narration_config()
     chunks = story_chunks_for_tts(story_text, max_chars)
     if not chunks:
         raise ValueError("Story text is empty")
     print(f"{len(chunks)} chunks", file=sys.stderr)
 
+    voice_ref = VoiceReference(path=ref_audio, text=ref_text)
     tmpdir = tempfile.mkdtemp(
         prefix="story_chunks_", dir=str(out_path.parent if out_path.parent.exists() else ROOT / "out")
     )
-    t_gen = time.time()
+    t_total = time.time()
     try:
-        _, sr = generate_chunks_to_wav(
-            model,
+        active_model = tts_session.model if tts_session else model
+        _files, sr, t_tts = generate_chunks_to_wav(
+            active_model,
             chunks,
-            ref_audio,
-            ref_text,
+            voice_ref,
             "Korean",
             tmpdir,
             sentence_pause,
@@ -226,10 +275,45 @@ def narrate_story(
             dialogue_style=dialogue_style,
             on_chunk=on_progress,
         )
+        chunk_paths = [Path(p) for p in _files]
+        t_asr = 0.0
+        retries = 0
+
+        if cfg.verify_asr:
+            if tts_session is None:
+                raise RuntimeError("ASR verify requires TtsSession for TTS/ASR memory handoff")
+
+            def _resynth(m, chunk_tuple, path: Path) -> None:
+                synthesize_chunk_to_wav(
+                    m,
+                    chunk_tuple,
+                    voice_ref,
+                    "Korean",
+                    temperature,
+                    path,
+                    dialogue_style,
+                )
+
+            chunk_paths, vstats = run_asr_verification(
+                chunks,
+                chunk_paths,
+                tts_session,
+                cfg,
+                _resynth,
+            )
+            t_asr = vstats.asr_seconds
+            retries = vstats.retry_generations
+
         lst = os.path.join(tmpdir, "list.txt")
-        ffmpeg_concat_to_out(lst, sr, out_path)
+        story_wav = Path(tmpdir) / "story_concat.wav"
+        ffmpeg_concat_wav(lst, sr, story_wav)
+        t_ln = time.time()
+        apply_final_loudnorm_if_enabled(story_wav)
+        t_ln = time.time() - t_ln
+        encode_story_from_wav(story_wav, out_path, sr)
         print(
-            f"done: {out_path}  gen {time.time() - t_gen:.1f}s",
+            f"done: {out_path}  TTS {t_tts:.1f}s  ASR {t_asr:.1f}s  "
+            f"retries {retries}  loudnorm {t_ln:.1f}s  total {time.time() - t_total:.1f}s",
             file=sys.stderr,
         )
     finally:
@@ -252,6 +336,9 @@ class StoryGenerator:
         temperature: float | None = None,
         dialogue_style: bool | None = None,
         keep_chunks: bool = False,
+        verify_asr: bool | None = None,
+        cer_threshold: float | None = None,
+        max_asr_retries: int | None = None,
     ) -> None:
         from mlx_audio.tts.utils import load_model
 
@@ -269,10 +356,46 @@ class StoryGenerator:
         self.temperature = temperature
         self.dialogue_style = dialogue_style if dialogue_style is not None else dialogue_style_enabled()
         self.keep_chunks = keep_chunks
+        self.model_id = model_id
+        self._model = None
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from audio_quality_config import (
+            DEFAULT_CER_THRESHOLD,
+            DEFAULT_MAX_ASR_RETRIES,
+            asr_verify_enabled,
+        )
+        from story_narration import NarrationConfig, TtsSession
+
+        self.narration_config = NarrationConfig(
+            verify_asr=verify_asr if verify_asr is not None else asr_verify_enabled(),
+            cer_threshold=cer_threshold if cer_threshold is not None else DEFAULT_CER_THRESHOLD,
+            max_asr_retries=max_asr_retries if max_asr_retries is not None else DEFAULT_MAX_ASR_RETRIES,
+        )
+        self._TtsSession = TtsSession
         t0 = time.time()
         print(f"Loading model {model_id}…", file=sys.stderr)
-        self.model = load_model(model_id)
+        self._model = load_model(model_id)
         print(f"model loaded in {time.time() - t0:.1f}s", file=sys.stderr)
+
+    @property
+    def model(self):
+        return self._model
+
+    def _load_model(self):
+        if self._model is None:
+            from mlx_audio.tts.utils import load_model
+
+            print(f"Reloading TTS model {self.model_id}…", file=sys.stderr)
+            t0 = time.time()
+            self._model = load_model(self.model_id)
+            print(f"TTS reloaded in {time.time() - t0:.1f}s", file=sys.stderr)
+        return self._model
+
+    def _unload_model(self) -> None:
+        self._model = None
+        from asr_verify import release_mlx_memory
+
+        release_mlx_memory()
 
     def generate_story(
         self,
@@ -282,12 +405,15 @@ class StoryGenerator:
     ) -> None:
         import mlx.core as mx
 
+        session = None
+        if self.narration_config.verify_asr:
+            session = self._TtsSession(self._load_model, self._unload_model)
         narrate_story(
             story_text,
             output_path,
             self.ref_audio,
             self.ref_text,
-            self.model,
+            self._model,
             max_chars=self.max_chars,
             sentence_pause=self.sentence_pause,
             paragraph_pause=self.paragraph_pause,
@@ -295,6 +421,8 @@ class StoryGenerator:
             dialogue_style=self.dialogue_style,
             keep_chunks=self.keep_chunks,
             on_progress=on_progress,
+            narration_config=self.narration_config,
+            tts_session=session,
         )
         try:
             print(f"peak mem {mx.get_peak_memory() / 1e9:.2f} GB", file=sys.stderr)

@@ -16,6 +16,8 @@ from audio_quality_config import (
     dialogue_gain_db,
     dialogue_pitch_semitones,
     dialogue_post_should_run,
+    final_loudnorm_enabled,
+    final_loudnorm_integrated,
     narration_loudnorm_enabled,
     narration_loudnorm_integrated,
 )
@@ -233,3 +235,126 @@ def apply_narration_loudnorm_if_enabled(input_wav: Path, sample_rate: int = 2400
     styled = input_wav.with_suffix(".loudnorm.wav")
     run_ffmpeg(ffmpeg_narration_loudnorm_cmd(input_wav, styled, sample_rate))
     styled.replace(input_wav)
+
+
+def _parse_loudnorm_json(stderr: str) -> dict[str, str]:
+    import json
+
+    start = stderr.rfind("{")
+    if start < 0:
+        raise RuntimeError("loudnorm pass1: no JSON in ffmpeg output")
+    return json.loads(stderr[start:])
+
+
+def loudnorm_two_pass_wav(input_wav: Path, output_wav: Path, integrated_lufs: float) -> None:
+    """EBU R128 loudnorm (measure pass + apply pass)."""
+    base = f"I={integrated_lufs}:TP=-1.5:LRA=11"
+    pass1 = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "info",
+            "-i",
+            str(input_wav),
+            "-af",
+            f"loudnorm={base}:print_format=json",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if pass1.returncode != 0:
+        raise RuntimeError(pass1.stderr or "loudnorm pass1 failed")
+    stats = _parse_loudnorm_json(pass1.stderr)
+    measured = (
+        f"measured_I={stats['input_i']}:measured_TP={stats['input_tp']}:"
+        f"measured_LRA={stats['input_lra']}:measured_thresh={stats['input_thresh']}:"
+        f"offset={stats['target_offset']}"
+    )
+    run_ffmpeg(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(input_wav),
+            "-af",
+            f"loudnorm={base}:{measured}:linear=true:print_format=none",
+            "-ar",
+            "24000",
+            "-ac",
+            "1",
+            str(output_wav),
+        ]
+    )
+
+
+def apply_final_loudnorm_if_enabled(input_wav: Path, output_wav: Path | None = None) -> Path:
+    """Normalize full story WAV in-place (or to ``output_wav``)."""
+    if not final_loudnorm_enabled():
+        if output_wav and output_wav != input_wav:
+            import shutil
+
+            shutil.copy2(input_wav, output_wav)
+        return input_wav
+    target = output_wav or input_wav.with_suffix(".normalized.wav")
+    loudnorm_two_pass_wav(input_wav, target, final_loudnorm_integrated())
+    if output_wav is None:
+        target.replace(input_wav)
+        return input_wav
+    return target
+
+
+def encode_story_from_wav(story_wav: Path, out_path: Path, sample_rate: int) -> None:
+    """Encode normalized WAV to m4a/mp3/wav destination."""
+    suffix = out_path.suffix.lower()
+    if suffix in {".m4a", ".mp4"}:
+        run_ffmpeg(
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                str(story_wav),
+                "-ar",
+                str(sample_rate),
+                "-ac",
+                "1",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                str(out_path),
+            ]
+        )
+    elif suffix == ".mp3":
+        run_ffmpeg(
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                str(story_wav),
+                "-ar",
+                str(sample_rate),
+                "-ac",
+                "1",
+                "-c:a",
+                "libmp3lame",
+                "-q:a",
+                "2",
+                str(out_path),
+            ]
+        )
+    else:
+        import shutil
+
+        shutil.copy2(story_wav, out_path)

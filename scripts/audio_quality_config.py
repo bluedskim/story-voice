@@ -35,6 +35,17 @@ DIALOGUE_EQ_PRESETS: dict[str, str] = {
 # Optional EBU loudnorm on narration chunks only
 DEFAULT_NARRATION_LOUDNORM_I = -23.0
 
+# Final story loudnorm (after concat + dialogue EQ)
+DEFAULT_FINAL_LOUDNORM_I = -16.0
+DEFAULT_FINAL_LOUDNORM = True
+
+# ASR verification (opt-in)
+DEFAULT_ASR_MODEL = "mlx-community/Qwen3-ASR-0.6B-8bit"
+DEFAULT_CER_THRESHOLD = 0.18
+DEFAULT_MAX_ASR_RETRIES = 2
+MASS_RETRY_FAIL_FRACTION = 0.5
+DEFAULT_ASR_VERIFY = False
+
 
 def _float_env(name: str, default: float) -> float:
     raw = os.environ.get(name, "").strip()
@@ -84,6 +95,27 @@ def dialogue_style_enabled() -> bool:
     if raw in {"1", "true", "yes", "on"}:
         return True
     return True
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    return default
+
+
+def final_loudnorm_enabled() -> bool:
+    return _bool_env("STORY_VOICE_LOUDNORM", DEFAULT_FINAL_LOUDNORM)
+
+
+def final_loudnorm_integrated() -> float:
+    return _float_env("STORY_VOICE_LOUDNORM_I", DEFAULT_FINAL_LOUDNORM_I)
+
+
+def asr_verify_enabled() -> bool:
+    return _bool_env("STORY_VOICE_ASR_VERIFY", DEFAULT_ASR_VERIFY)
 
 
 def dialogue_post_should_run() -> bool:
