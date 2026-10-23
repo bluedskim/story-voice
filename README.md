@@ -79,6 +79,19 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 
 생성 파일: `data/audio/<id>.m4a` (역시 git 제외).
 
+#### 대사(따옴표) 스타일 — EQ
+
+동화 원문에서 `"…"` / `‘…’` 안의 **대사**는 별도 TTS 청크로 읽고, 기본적으로 **airy** EQ 프리셋을 씁니다 (피치·볼륨 보정은 0, 사용자가 env로만 조정).
+
+| 환경 변수 | 설명 |
+|-----------|------|
+| `STORY_VOICE_DIALOGUE_EQ_PRESET` | `airy` (기본), `bright`, `warm` — `off`면 EQ 없음 |
+| `STORY_VOICE_DIALOGUE_EQ` | ffmpeg `-af` 체인 전체를 직접 지정 (프리셋보다 우선) |
+| `STORY_VOICE_DIALOGUE_STYLE=0` | 대사 후처리 끔 (`clone_story.py --no-dialogue-style` 동일) |
+| `STORY_VOICE_DIALOGUE_PITCH_ST` / `STORY_VOICE_DIALOGUE_GAIN_DB` | 기본 0 (선택) |
+
+대사 청크 처리 순서: 페이드 인 → (선택) 피치/게인 → EQ → **입력 평균 음량에 맞춤** → 피크 리미터 (`alimiter`, 약 -1 dBFS) → 페이드 아웃.
+
 ### 5. 웹 플레이어 + 다시 만들기
 
 ```bash

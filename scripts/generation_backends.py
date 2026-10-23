@@ -68,9 +68,10 @@ class FakeGenerationBackend(GenerationBackend):
         output_path: Path,
         on_progress: ProgressCallback,
     ) -> None:
-        from clone_story import split_sentences, DEFAULT_MAX_CHARS
+        from audio_quality_config import DEFAULT_MAX_CHARS
+        from story_segmentation import split_story_into_chunks
 
-        chunks = split_sentences(story_text, DEFAULT_MAX_CHARS)
+        chunks = split_story_into_chunks(story_text, DEFAULT_MAX_CHARS)
         total = max(len(chunks), 1)
         for i in range(total):
             on_progress(i + 1, total, story_id)
