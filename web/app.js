@@ -1,4 +1,13 @@
+import {
+  apiFetch,
+  canWrite,
+  initAuthUi,
+  onAuthChange,
+  refreshAuthFromConfig,
+} from "./auth.js";
+
 const listEl = document.getElementById("story-list");
+const voiceAuthGateEl = document.getElementById("voice-auth-gate");
 const audio = document.getElementById("player");
 const genStatusEl = document.getElementById("gen-status");
 const genStatusTextEl = document.getElementById("gen-status-text");
@@ -94,19 +103,38 @@ function setAppBusy(busy) {
     prepareVoiceBtn.disabled = true;
     recordBtn.disabled = true;
     stopBtn.disabled = true;
-  } else if (!mediaRecorder || mediaRecorder.state === "inactive") {
-    recordBtn.disabled = false;
-    stopBtn.disabled = true;
-    if (pendingBlob) prepareVoiceBtn.disabled = false;
+  } else {
+    updateWriteGates();
   }
 }
 
 async function loadConfig() {
-  const res = await fetch("/api/config", { cache: "no-store" });
-  if (!res.ok) throw new Error("config");
-  const data = await res.json();
+  const data = await refreshAuthFromConfig();
   recordScriptEl.value = data.recordScript || "";
+  updateWriteGates();
 }
+
+function updateWriteGates() {
+  const allowed = canWrite();
+  document.body.classList.toggle("can-write", allowed);
+  if (voiceAuthGateEl) {
+    voiceAuthGateEl.hidden = allowed;
+  }
+  regenAllBtn.disabled = generationBusy || !allowed;
+  if (!allowed) {
+    recordBtn.disabled = true;
+    prepareVoiceBtn.disabled = true;
+    stopBtn.disabled = true;
+  } else if (!generationBusy && (!mediaRecorder || mediaRecorder.state === "inactive")) {
+    recordBtn.disabled = false;
+    if (pendingBlob) prepareVoiceBtn.disabled = false;
+  }
+  document.querySelectorAll(".regen-btn").forEach((btn) => {
+    if (btn.tagName === "BUTTON") btn.disabled = generationBusy || !allowed;
+  });
+}
+
+onAuthChange(() => updateWriteGates());
 
 function probeDuration(story) {
   if (!story.hasAudio || durationCache[story.id]) return;
@@ -182,6 +210,7 @@ function render() {
     regen.className = "btn btn-secondary regen-btn";
     regen.textContent = "다시 만들기";
     regen.addEventListener("click", () => enqueueStory(story.id));
+    regen.disabled = !canWrite();
 
     const actions = document.createElement("div");
     actions.className = "story-actions";
@@ -323,7 +352,7 @@ npSeekEl.addEventListener("change", () => {
 });
 
 async function enqueueStory(id) {
-  const res = await fetch(`/api/generation/story/${id}`, { method: "POST" });
+  const res = await apiFetch(`/api/generation/story/${id}`, { method: "POST" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     showGenStatus(data.error || "요청하지 못했어요.", true);
@@ -334,7 +363,7 @@ async function enqueueStory(id) {
 }
 
 async function enqueueAll() {
-  const res = await fetch("/api/generation/all", { method: "POST" });
+  const res = await apiFetch("/api/generation/all", { method: "POST" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     showGenStatus(data.error || "요청하지 못했어요.", true);
@@ -521,7 +550,7 @@ async function prepareVoice() {
   prepareVoiceBtn.disabled = true;
   voiceMsgEl.textContent = "받아쓰는 중… (잠시만요)";
   voiceMsgEl.className = "voice-msg";
-  const res = await fetch("/api/voice/prepare", { method: "POST", body: voiceFormData() });
+  const res = await apiFetch("/api/voice/prepare", { method: "POST", body: voiceFormData() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     voiceMsgEl.textContent = data.error || "받아쓰기에 실패했어요.";
@@ -552,7 +581,7 @@ async function saveVoice() {
   }
   saveVoiceBtn.disabled = true;
   voiceMsgEl.textContent = "저장하는 중…";
-  const res = await fetch("/api/voice/confirm", {
+  const res = await apiFetch("/api/voice/confirm", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pendingToken, transcript: transcriptEl.value }),
@@ -593,6 +622,7 @@ saveVoiceBtn.addEventListener("click", saveVoice);
 regenAllBtn.addEventListener("click", enqueueAll);
 
 setupTabs();
+initAuthUi();
 if (location.hash === "#voice") {
   document.querySelector('.tab[data-tab="voice"]')?.click();
 }
