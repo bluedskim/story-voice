@@ -13,9 +13,31 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from asr_verify import FakeAsrTranscriber, should_skip_mass_retry, score_chunk
-from audio_quality_config import asr_verify_enabled, final_loudnorm_enabled
+from audio_quality_config import asr_verify_enabled, final_loudnorm_enabled, parse_asr_verify_body, resolve_asr_verify
 from audio_post import apply_final_loudnorm_if_enabled, loudnorm_two_pass_wav
 from cer import character_error_rate
+
+
+def test_resolve_asr_verify_precedence() -> None:
+    env = os.environ.copy()
+    old = os.environ.get("STORY_VOICE_ASR_VERIFY")
+    try:
+        os.environ["STORY_VOICE_ASR_VERIFY"] = "1"
+        assert resolve_asr_verify(None) is True
+        assert resolve_asr_verify(False) is False
+        assert resolve_asr_verify(True) is True
+        assert parse_asr_verify_body({}) is None
+        assert parse_asr_verify_body({"asrVerify": False}) is False
+        try:
+            parse_asr_verify_body({"asrVerify": "yes"})
+            raise AssertionError("expected ValueError")
+        except ValueError:
+            pass
+    finally:
+        if old is None:
+            os.environ.pop("STORY_VOICE_ASR_VERIFY", None)
+        else:
+            os.environ["STORY_VOICE_ASR_VERIFY"] = old
 
 
 def test_asr_verify_default_off() -> None:
@@ -99,6 +121,7 @@ def test_loudnorm_two_pass() -> None:
 
 
 def main() -> int:
+    test_resolve_asr_verify_precedence()
     test_asr_verify_default_off()
     test_final_loudnorm_default_on()
     test_mass_retry_skip()

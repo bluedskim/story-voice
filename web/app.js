@@ -14,6 +14,8 @@ const genStatusTextEl = document.getElementById("gen-status-text");
 const genProgressEl = document.getElementById("gen-progress");
 const genProgressBarEl = document.getElementById("gen-progress-bar");
 const regenAllBtn = document.getElementById("regen-all");
+const regenAsrVerifyEl = document.getElementById("regen-asr-verify");
+const regenAsrWrapEl = document.getElementById("regen-asr-wrap");
 
 const recordScriptEl = document.getElementById("record-script");
 const transcriptEl = document.getElementById("transcript");
@@ -121,6 +123,8 @@ function updateWriteGates() {
     voiceAuthGateEl.hidden = allowed;
   }
   regenAllBtn.disabled = generationBusy || !allowed;
+  if (regenAsrWrapEl) regenAsrWrapEl.hidden = !allowed;
+  if (regenAsrVerifyEl) regenAsrVerifyEl.disabled = generationBusy || !allowed;
   if (!allowed) {
     recordBtn.disabled = true;
     prepareVoiceBtn.disabled = true;
@@ -351,8 +355,16 @@ npSeekEl.addEventListener("change", () => {
   syncNowPlayingUi();
 });
 
+function generationRequestBody() {
+  return JSON.stringify({ asrVerify: Boolean(regenAsrVerifyEl?.checked) });
+}
+
 async function enqueueStory(id) {
-  const res = await apiFetch(`/api/generation/story/${id}`, { method: "POST" });
+  const res = await apiFetch(`/api/generation/story/${id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: generationRequestBody(),
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     showGenStatus(data.error || "요청하지 못했어요.", true);
@@ -363,7 +375,11 @@ async function enqueueStory(id) {
 }
 
 async function enqueueAll() {
-  const res = await apiFetch("/api/generation/all", { method: "POST" });
+  const res = await apiFetch("/api/generation/all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: generationRequestBody(),
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     showGenStatus(data.error || "요청하지 못했어요.", true);

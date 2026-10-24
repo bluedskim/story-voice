@@ -25,6 +25,8 @@ class GenerationBackend(ABC):
         story_text: str,
         output_path: Path,
         on_progress: ProgressCallback,
+        *,
+        verify_asr: bool = False,
     ) -> None:
         pass
 
@@ -36,6 +38,7 @@ class FakeGenerationBackend(GenerationBackend):
         if chunk_delay is None:
             chunk_delay = float(os.environ.get("STORY_VOICE_FAKE_CHUNK_DELAY", "0.02"))
         self.chunk_delay = chunk_delay
+        self.last_verify_asr: bool | None = None
         self._ensure_fixture()
 
     def _ensure_fixture(self) -> None:
@@ -67,7 +70,10 @@ class FakeGenerationBackend(GenerationBackend):
         story_text: str,
         output_path: Path,
         on_progress: ProgressCallback,
+        *,
+        verify_asr: bool = False,
     ) -> None:
+        self.last_verify_asr = verify_asr
         from audio_quality_config import DEFAULT_MAX_CHARS
         from story_segmentation import split_story_into_chunks
 
@@ -102,6 +108,8 @@ class MLXGenerationBackend(GenerationBackend):
         story_text: str,
         output_path: Path,
         on_progress: ProgressCallback,
+        *,
+        verify_asr: bool = False,
     ) -> None:
         from clone_story import split_sentences, DEFAULT_MAX_CHARS
 
@@ -111,6 +119,7 @@ class MLXGenerationBackend(GenerationBackend):
             on_progress(current, total, story_id)
 
         generator = self._get_generator()
+        generator.narration_config.verify_asr = verify_asr
         generator.generate_story(story_text, output_path, on_progress=on_chunk)
 
 

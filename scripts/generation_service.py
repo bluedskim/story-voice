@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AUDIO_DIR = ROOT / "data" / "audio"
 STAGING_DIR = AUDIO_DIR / ".staging"
 
+from audio_quality_config import resolve_asr_verify
 from generation_backends import GenerationBackend, get_backend
 from story_catalog import list_stories, load_story, write_manifest
 
@@ -41,6 +42,7 @@ class JobState(str, Enum):
 class GenerationJob:
     job_id: str
     story_ids: list[str]
+    asr_verify: bool = False
     state: JobState = JobState.QUEUED
     current_story_id: str | None = None
     chunk_index: int = 0
@@ -58,6 +60,7 @@ class GenerationJob:
             "chunkIndex": self.chunk_index,
             "chunkTotal": self.chunk_total,
             "error": self.error,
+            "asrVerify": self.asr_verify,
         }
 
 
@@ -118,15 +121,18 @@ class GenerationService:
                     return job
         return None
 
-    def enqueue_story(self, story_id: str) -> EnqueueResult:
+    def enqueue_story(self, story_id: str, asr_verify_request: bool | None = None) -> EnqueueResult:
         if story_id not in self.catalog_ids():
             raise StoryNotFoundError(story_id)
         existing = self._find_active_job_for_story(story_id)
         if existing:
             return EnqueueResult(job=existing, created=False)
-        return EnqueueResult(job=self._enqueue([story_id]), created=True)
+        return EnqueueResult(
+            job=self._enqueue([story_id], asr_verify_request=asr_verify_request),
+            created=True,
+        )
 
-    def enqueue_all(self) -> EnqueueResult:
+    def enqueue_all(self, asr_verify_request: bool | None = None) -> EnqueueResult:
         active = self._active_story_ids()
         ids = [s.id for s in list_stories() if s.id not in active]
         if not ids:
@@ -134,13 +140,20 @@ class GenerationService:
             if existing:
                 return EnqueueResult(job=existing, created=False)
             raise RuntimeError("생성할 이야기가 없어요.")
-        return EnqueueResult(job=self._enqueue(ids), created=True)
+        return EnqueueResult(
+            job=self._enqueue(ids, asr_verify_request=asr_verify_request),
+            created=True,
+        )
 
-    def _enqueue(self, story_ids: list[str]) -> GenerationJob:
+    def _enqueue(self, story_ids: list[str], asr_verify_request: bool | None = None) -> GenerationJob:
         if not story_ids:
             raise ValueError("no stories")
         job_id = str(uuid.uuid4())
-        job = GenerationJob(job_id=job_id, story_ids=story_ids)
+        job = GenerationJob(
+            job_id=job_id,
+            story_ids=story_ids,
+            asr_verify=resolve_asr_verify(asr_verify_request),
+        )
         with self._lock:
             self._jobs[job_id] = job
             self._order.append(job_id)
@@ -233,7 +246,13 @@ class GenerationService:
                     job.chunk_index = current
                     job.chunk_total = total
 
-                self._backend.generate_story(story_id, story.body, tmp_out, on_progress)
+                self._backend.generate_story(
+                    story_id,
+                    story.body,
+                    tmp_out,
+                    on_progress,
+                    verify_asr=job.asr_verify,
+                )
                 os.replace(tmp_out, final_out)
 
             write_manifest(MANIFEST_PATH)

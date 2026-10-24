@@ -23,6 +23,7 @@ from download_filenames import (
     content_disposition_attachment,
     download_basename,
 )
+from audio_quality_config import parse_asr_verify_body
 from generation_service import EnqueueResult, GenerationService, JobState, StoryNotFoundError
 from auth_csrf import CSRF_COOKIE, CSRF_HEADER, new_csrf_token, parse_cookies, validate_csrf
 from auth_db import AuthDatabase
@@ -439,8 +440,17 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if self._require_admin_write() is None:
                 return
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
             try:
-                result = self.app.generation.enqueue_story(story_id)
+                asr_flag = parse_asr_verify_body(body)
+            except ValueError:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "asrVerify는 true 또는 false여야 해요."})
+                return
+            try:
+                result = self.app.generation.enqueue_story(story_id, asr_verify_request=asr_flag)
                 self._send_enqueue_result(result)
             except StoryNotFoundError:
                 send_json(self, HTTPStatus.NOT_FOUND, {"error": "이야기를 찾을 수 없어요."})
@@ -456,8 +466,17 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if self._require_admin_write() is None:
                 return
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
             try:
-                result = self.app.generation.enqueue_all()
+                asr_flag = parse_asr_verify_body(body)
+            except ValueError:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "asrVerify는 true 또는 false여야 해요."})
+                return
+            try:
+                result = self.app.generation.enqueue_all(asr_verify_request=asr_flag)
                 self._send_enqueue_result(result)
             except RuntimeError as exc:
                 send_json(self, HTTPStatus.CONFLICT, {"error": str(exc)})
