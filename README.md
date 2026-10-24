@@ -98,7 +98,7 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 |-----------|------|
 | `STORY_VOICE_LOUDNORM` | 완성본 concat **후** ffmpeg `loudnorm` 2-pass (기본 `1`) |
 | `STORY_VOICE_LOUDNORM_I` | 통합 LUFS 목표 (기본 `-16`) — 대사 EQ 상대 밸런스는 유지 |
-| `STORY_VOICE_ASR_VERIFY` | 청크 ASR 검증·재시도 (기본 `0`, opt-in). CER 0.18, 최대 2회, 50%↑ 실패 시 일괄 재시도 생략 |
+| `STORY_VOICE_ASR_VERIFY` | 청크 ASR 검증·재시도 (기본 `0`, opt-in). CER 0.18, 최대 2회, 50%↑ 실패 시 일괄 재시도 생략. **웹에서 다시 만들기** 시 JSON `asrVerify`가 있으면 그 값이 우선하고, 없으면 이 환경 변수를 따름 (CLI·`generate_all.py`는 환경 변수만 사용) |
 
 참조 음성은 이야기당 한 번 로드합니다. ASR 검증 시 TTS/ASR 모델은 16GB급 메모리를 위해 번갈아 로드합니다.
 

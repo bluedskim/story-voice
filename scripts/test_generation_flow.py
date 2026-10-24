@@ -113,6 +113,34 @@ def multipart_voice(wav_path: Path, transcript: str) -> bytes:
     return body
 
 
+def test_generation_asr_enqueue_flags() -> None:
+    import os
+
+    from generation_backends import FakeGenerationBackend
+    from generation_service import GenerationService
+
+    old = os.environ.get("STORY_VOICE_ASR_VERIFY")
+    try:
+        os.environ["STORY_VOICE_ASR_VERIFY"] = "1"
+        off = GenerationService(backend=FakeGenerationBackend()).enqueue_story(
+            "ui-joeun-hyeongje", asr_verify_request=False
+        )
+        assert off.job.asr_verify is False
+        env_default = GenerationService(backend=FakeGenerationBackend()).enqueue_story(
+            "ui-joeun-hyeongje", asr_verify_request=None
+        )
+        assert env_default.job.asr_verify is True
+        on = GenerationService(backend=FakeGenerationBackend()).enqueue_story(
+            "ui-joeun-hyeongje", asr_verify_request=True
+        )
+        assert on.job.asr_verify is True
+    finally:
+        if old is None:
+            os.environ.pop("STORY_VOICE_ASR_VERIFY", None)
+        else:
+            os.environ["STORY_VOICE_ASR_VERIFY"] = old
+
+
 def test_download_filename_helpers() -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
     from download_filenames import (
@@ -133,6 +161,7 @@ def test_download_filename_helpers() -> None:
 
 def main() -> int:
     test_download_filename_helpers()
+    test_generation_asr_enqueue_flags()
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -213,19 +242,33 @@ def main() -> int:
             ref = ROOT / "data" / "voice" / "reference.wav"
             assert ref.is_file(), "reference.wav missing"
 
+            try:
+                http(
+                    "POST",
+                    "/api/generation/story/ui-joeun-hyeongje",
+                    data=b'{"asrVerify":"yes"}',
+                    headers={"Content-Type": "application/json", **write_hdrs},
+                )
+                raise AssertionError("expected 400 for bad asrVerify")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 400
+
             res = http(
                 "POST",
                 "/api/generation/story/ui-joeun-hyeongje",
-                headers=write_hdrs,
+                data=b'{"asrVerify":false}',
+                headers={"Content-Type": "application/json", **write_hdrs},
             )
             assert res.status == 202
             first = json.loads(res.read().decode())
             job_id = first["job"]["jobId"]
+            assert first["job"].get("asrVerify") is False
 
             res2 = http(
                 "POST",
                 "/api/generation/story/ui-joeun-hyeongje",
-                headers=write_hdrs,
+                data=b"{}",
+                headers={"Content-Type": "application/json", **write_hdrs},
             )
             dup = json.loads(res2.read().decode())
             assert dup.get("deduplicated") is True

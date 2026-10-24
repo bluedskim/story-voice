@@ -118,6 +118,29 @@ def asr_verify_enabled() -> bool:
     return _bool_env("STORY_VOICE_ASR_VERIFY", DEFAULT_ASR_VERIFY)
 
 
+def resolve_asr_verify(request_flag: bool | None) -> bool:
+    """ASR verify for one generation run.
+
+    Precedence: an explicit per-request flag (admin UI JSON ``asrVerify``) wins;
+    when the flag is omitted (CLI, launchd, empty POST body), use ``STORY_VOICE_ASR_VERIFY``.
+    """
+    if request_flag is not None:
+        return request_flag
+    return asr_verify_enabled()
+
+
+def parse_asr_verify_body(body: dict | None) -> bool | None:
+    """Extract optional ``asrVerify`` from a generation POST body; ``None`` if absent."""
+    if body is None:
+        return None
+    if "asrVerify" not in body:
+        return None
+    val = body["asrVerify"]
+    if isinstance(val, bool):
+        return val
+    raise ValueError("asrVerify must be a boolean")
+
+
 def dialogue_post_should_run() -> bool:
     if not dialogue_style_enabled():
         return False
