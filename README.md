@@ -93,7 +93,7 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 
 다시 airy EQ를 쓰려면 예: `STORY_VOICE_DIALOGUE_STYLE=1` (또는 launchd/`.env`에 동일 설정).
 
-각 TTS 청크는 후처리(EQ 등) **이후** 아주 짧은 무음을 붙입니다 (내레이션·대사 공통). 기본 **25ms** (`STORY_VOICE_CHUNK_TAIL_PAD_SEC`, 기본 `0.025`)이고, TTS 꼬리가 거의 없이 딱 끊긴 경우에만 **추가 35ms** (`STORY_VOICE_CHUNK_TAIL_GUARD_EXTRA_SEC`, `STORY_VOICE_CHUNK_TAIL_GUARD=1` 기본)를 더합니다 — 잘린 양이 작을 때를 맞춘 보수적 값이며, 여유 있게 끝나는 줄은 **25ms만** 늘어납니다.
+각 TTS 청크는 후처리(EQ 등) **이후** 아주 짧은 무음을 붙입니다 (내레이션·대사 공통). 기본 **25ms** (`STORY_VOICE_CHUNK_TAIL_PAD_SEC`, 기본 `0.025`)이고, TTS 꼬리가 거의 없이 딱 끊긴 경우에만 **추가 65ms** (`STORY_VOICE_CHUNK_TAIL_GUARD_EXTRA_SEC`, 기본 `0.065`, `STORY_VOICE_CHUNK_TAIL_GUARD=1` 기본)를 더해 **합계 약 90ms** — 여유 있게 끝나는 줄은 **25ms만** 늘어납니다.
 
 대사 청크 처리 순서: 페이드 인 → (선택) 피치/게인 → EQ → **입력 평균 음량에 맞춤** → 피크 리미터 (`alimiter`, 약 -1 dBFS). (페이드 아웃은 제거 — concat 직전 무음 패드로 경계 처리)
 

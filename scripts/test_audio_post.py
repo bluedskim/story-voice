@@ -157,6 +157,7 @@ def test_tail_guard_extra_on_tight_tts_end() -> None:
         assert trailing_silence_sec(samples, 24000) < 0.01
         pad = compute_chunk_tail_pad_sec(src, 24000)
         assert pad >= chunk_tail_pad_sec() + DEFAULT_CHUNK_TAIL_GUARD_EXTRA_SEC - 0.001
+        assert 0.080 <= pad <= 0.100
 
 
 def test_tail_guard_skips_extra_when_trailing_silence_present() -> None:
