@@ -68,7 +68,11 @@ def post_process_chunk_wav(
     dialogue_style: bool,
 ) -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
-    from audio_post import apply_dialogue_style, apply_narration_loudnorm_if_enabled
+    from audio_post import (
+        apply_chunk_tail_pad,
+        apply_dialogue_style,
+        apply_narration_loudnorm_if_enabled,
+    )
     from audio_quality_config import dialogue_post_should_run
 
     if role == "dialogue" and dialogue_style and dialogue_post_should_run():
@@ -77,6 +81,7 @@ def post_process_chunk_wav(
         styled.replace(chunk_path)
     elif role == "narration":
         apply_narration_loudnorm_if_enabled(chunk_path, sr)
+    apply_chunk_tail_pad(chunk_path, sr)
 
 
 def synthesize_chunk_to_wav(
@@ -175,15 +180,26 @@ def generate_chunks_to_wav(
         )
 
     lst = os.path.join(tmpdir, "list.txt")
-    with open(lst, "w", encoding="utf-8") as fh:
-        for i, f in enumerate(files):
-            if i:
-                _, pause_kind, _role = chunks[i - 1]
-                sil = sil_paragraph if pause_kind == "paragraph" else sil_sentence
-                fh.write(f"file '{sil}'\n")
-            fh.write(f"file '{f}'\n")
+    write_chunk_concat_list(lst, files, chunks, sil_sentence, sil_paragraph)
 
     return files, sr, time.time() - t_tts
+
+
+def write_chunk_concat_list(
+    list_path: str | Path,
+    chunk_files: list[str | Path],
+    chunks: list[tuple[str, str, str]],
+    silence_sentence: str | Path,
+    silence_paragraph: str | Path,
+) -> None:
+    """ffmpeg concat demuxer list: optional pause wav between chunk files."""
+    with open(list_path, "w", encoding="utf-8") as fh:
+        for i, f in enumerate(chunk_files):
+            if i:
+                _, pause_kind, _role = chunks[i - 1]
+                sil = silence_paragraph if pause_kind == "paragraph" else silence_sentence
+                fh.write(f"file '{os.fspath(sil)}'\n")
+            fh.write(f"file '{os.fspath(f)}'\n")
 
 
 def story_chunks_for_tts(story_text: str, max_chars: int) -> list[tuple[str, str, str]]:
@@ -304,7 +320,16 @@ def narrate_story(
             t_asr = vstats.asr_seconds
             retries = vstats.retry_generations
 
+        sil_sentence = os.path.join(tmpdir, "silence_sentence.wav")
+        sil_paragraph = os.path.join(tmpdir, "silence_paragraph.wav")
         lst = os.path.join(tmpdir, "list.txt")
+        write_chunk_concat_list(
+            lst,
+            [str(p) for p in chunk_paths],
+            chunks,
+            sil_sentence,
+            sil_paragraph,
+        )
         story_wav = Path(tmpdir) / "story_concat.wav"
         ffmpeg_concat_wav(lst, sr, story_wav)
         t_ln = time.time()

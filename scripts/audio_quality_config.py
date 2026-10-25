@@ -8,11 +8,18 @@ DEFAULT_MAX_CHARS = 120
 DEFAULT_SENTENCE_PAUSE = 0.35
 DEFAULT_PARAGRAPH_PAUSE = 0.75
 
-# Dialogue post-process (EQ by default; pitch/gain optional, default off)
+# Chunk tail: small baseline pad for every line; extra pad when TTS ends "tight" (flaky tails)
+DEFAULT_CHUNK_TAIL_PAD_SEC = 0.025
+DEFAULT_CHUNK_TAIL_GUARD_EXTRA_SEC = 0.035
+DEFAULT_CHUNK_TAIL_GUARD_MIN_SILENCE_SEC = 0.025
+DEFAULT_CHUNK_TAIL_GUARD = True
+
+# Dialogue post-process (opt-in; pitch/gain optional, default off)
+DEFAULT_DIALOGUE_STYLE = False
 DEFAULT_DIALOGUE_PITCH_ST = 0.0
 DEFAULT_DIALOGUE_GAIN_DB = 0.0
 DEFAULT_DIALOGUE_FADE_SEC = 0.012
-# Peak limit after loudness match (~-1 dBFS) before fade-out
+# Peak limit after loudness match (~-1 dBFS); chunk tail pad handles concat boundaries
 DIALOGUE_PEAK_LIMITER = "alimiter=limit=0.89:level=false"
 
 DEFAULT_DIALOGUE_EQ_PRESET = "airy"
@@ -66,9 +73,27 @@ def dialogue_fade_sec() -> float:
     return _float_env("STORY_VOICE_DIALOGUE_FADE_SEC", DEFAULT_DIALOGUE_FADE_SEC)
 
 
+def chunk_tail_pad_sec() -> float:
+    return max(0.0, _float_env("STORY_VOICE_CHUNK_TAIL_PAD_SEC", DEFAULT_CHUNK_TAIL_PAD_SEC))
+
+
+def chunk_tail_guard_extra_sec() -> float:
+    return max(0.0, _float_env("STORY_VOICE_CHUNK_TAIL_GUARD_EXTRA_SEC", DEFAULT_CHUNK_TAIL_GUARD_EXTRA_SEC))
+
+
+def chunk_tail_guard_min_silence_sec() -> float:
+    return max(0.0, _float_env("STORY_VOICE_CHUNK_TAIL_GUARD_MIN_SILENCE_SEC", DEFAULT_CHUNK_TAIL_GUARD_MIN_SILENCE_SEC))
+
+
+def chunk_tail_guard_enabled() -> bool:
+    return _bool_env("STORY_VOICE_CHUNK_TAIL_GUARD", DEFAULT_CHUNK_TAIL_GUARD)
+
+
 def dialogue_eq_filter() -> str | None:
     """Custom ffmpeg chain, named preset, or default ``airy`` when dialogue style is on."""
     custom = os.environ.get("STORY_VOICE_DIALOGUE_EQ", "").strip()
+    if custom.lower() in {"0", "off", "none"}:
+        return None
     if custom:
         return custom
     preset = os.environ.get("STORY_VOICE_DIALOGUE_EQ_PRESET", "").strip().lower()
@@ -89,12 +114,7 @@ def narration_loudnorm_integrated() -> float:
 
 
 def dialogue_style_enabled() -> bool:
-    raw = os.environ.get("STORY_VOICE_DIALOGUE_STYLE", "").strip().lower()
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    return True
+    return _bool_env("STORY_VOICE_DIALOGUE_STYLE", DEFAULT_DIALOGUE_STYLE)
 
 
 def _bool_env(name: str, default: bool) -> bool:
