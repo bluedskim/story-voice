@@ -11,7 +11,8 @@ DEFAULT_PARAGRAPH_PAUSE = 0.75
 # Trailing silence appended to each TTS chunk (protects word endings from EQ/limiter/concat)
 DEFAULT_CHUNK_TAIL_PAD_SEC = 0.06
 
-# Dialogue post-process (EQ by default; pitch/gain optional, default off)
+# Dialogue post-process (opt-in; pitch/gain optional, default off)
+DEFAULT_DIALOGUE_STYLE = False
 DEFAULT_DIALOGUE_PITCH_ST = 0.0
 DEFAULT_DIALOGUE_GAIN_DB = 0.0
 DEFAULT_DIALOGUE_FADE_SEC = 0.012
@@ -76,6 +77,8 @@ def chunk_tail_pad_sec() -> float:
 def dialogue_eq_filter() -> str | None:
     """Custom ffmpeg chain, named preset, or default ``airy`` when dialogue style is on."""
     custom = os.environ.get("STORY_VOICE_DIALOGUE_EQ", "").strip()
+    if custom.lower() in {"0", "off", "none"}:
+        return None
     if custom:
         return custom
     preset = os.environ.get("STORY_VOICE_DIALOGUE_EQ_PRESET", "").strip().lower()
@@ -96,12 +99,7 @@ def narration_loudnorm_integrated() -> float:
 
 
 def dialogue_style_enabled() -> bool:
-    raw = os.environ.get("STORY_VOICE_DIALOGUE_STYLE", "").strip().lower()
-    if raw in {"0", "false", "no", "off"}:
-        return False
-    if raw in {"1", "true", "yes", "on"}:
-        return True
-    return True
+    return _bool_env("STORY_VOICE_DIALOGUE_STYLE", DEFAULT_DIALOGUE_STYLE)
 
 
 def _bool_env(name: str, default: bool) -> bool:

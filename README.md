@@ -79,16 +79,19 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 
 생성 파일: `data/audio/<id>.m4a` (역시 git 제외).
 
-#### 대사(따옴표) 스타일 — EQ
+#### 대사(따옴표) 스타일 — EQ (기본 **끔**)
 
-동화 원문에서 `"…"` / `‘…’` 안의 **대사**는 별도 TTS 청크로 읽고, 기본적으로 **airy** EQ 프리셋을 씁니다 (피치·볼륨 보정은 0, 사용자가 env로만 조정).
+동화 원문에서 `"…"` / `‘…’` 안의 **대사**는 별도 TTS 청크로 읽지만, **기본값은 내레이션과 동일한 음색**입니다 (대사 전용 EQ·페이드 후처리 없음).
 
 | 환경 변수 | 설명 |
 |-----------|------|
-| `STORY_VOICE_DIALOGUE_EQ_PRESET` | `airy` (기본), `bright`, `warm` — `off`면 EQ 없음 |
-| `STORY_VOICE_DIALOGUE_EQ` | ffmpeg `-af` 체인 전체를 직접 지정 (프리셋보다 우선) |
+| `STORY_VOICE_DIALOGUE_STYLE=1` | 대사 후처리 **켬** (`clone_story.py`는 플래그 없을 때 이 env를 따름) |
+| `STORY_VOICE_DIALOGUE_EQ_PRESET` | 스타일 켠 뒤 프리셋: `airy` (기본), `bright`, `warm` — `off`면 EQ 없음 |
+| `STORY_VOICE_DIALOGUE_EQ` | ffmpeg `-af` 체인 직접 지정 (프리셋보다 우선). `0` / `off` / `none` 이면 EQ 없음 |
 | `STORY_VOICE_DIALOGUE_STYLE=0` | 대사 후처리 끔 (`clone_story.py --no-dialogue-style` 동일) |
 | `STORY_VOICE_DIALOGUE_PITCH_ST` / `STORY_VOICE_DIALOGUE_GAIN_DB` | 기본 0 (선택) |
+
+다시 airy EQ를 쓰려면 예: `STORY_VOICE_DIALOGUE_STYLE=1` (또는 launchd/`.env`에 동일 설정).
 
 각 TTS 청크 끝에 기본 **60ms 무음 패드** (`STORY_VOICE_CHUNK_TAIL_PAD_SEC`, 기본 `0.06`)를 붙여 마지막 음절이 잘리지 않게 합니다.
 

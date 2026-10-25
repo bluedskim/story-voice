@@ -64,15 +64,25 @@ def _clear_dialogue_env() -> None:
         os.environ.pop(key, None)
 
 
-def test_defaults_use_airy_preset() -> None:
+def test_defaults_dialogue_post_off() -> None:
     _clear_dialogue_env()
     assert DEFAULT_DIALOGUE_PITCH_ST == 0.0
     assert DEFAULT_DIALOGUE_GAIN_DB == 0.0
     assert DEFAULT_DIALOGUE_EQ_PRESET == "airy"
+    assert not dialogue_post_should_run()
     eq = dialogue_eq_filter()
     assert eq == DIALOGUE_EQ_PRESETS["airy"]
-    assert "highpass=f=110" in eq
-    assert dialogue_post_should_run()
+
+
+def test_enable_dialogue_style_runs_airy_eq() -> None:
+    _clear_dialogue_env()
+    os.environ["STORY_VOICE_DIALOGUE_STYLE"] = "1"
+    try:
+        assert dialogue_post_should_run()
+        eq = dialogue_eq_filter()
+        assert eq and "highpass=f=110" in eq
+    finally:
+        os.environ.pop("STORY_VOICE_DIALOGUE_STYLE", None)
 
 
 def test_disable_dialogue_style() -> None:
@@ -82,6 +92,18 @@ def test_disable_dialogue_style() -> None:
         assert not dialogue_post_should_run()
     finally:
         os.environ.pop("STORY_VOICE_DIALOGUE_STYLE", None)
+
+
+def test_dialogue_eq_zero_disables_filter() -> None:
+    _clear_dialogue_env()
+    os.environ["STORY_VOICE_DIALOGUE_STYLE"] = "1"
+    os.environ["STORY_VOICE_DIALOGUE_EQ"] = "0"
+    try:
+        assert dialogue_eq_filter() is None
+        assert not dialogue_post_should_run()
+    finally:
+        os.environ.pop("STORY_VOICE_DIALOGUE_STYLE", None)
+        os.environ.pop("STORY_VOICE_DIALOGUE_EQ", None)
 
 
 def test_bright_preset_override() -> None:
@@ -115,11 +137,9 @@ def test_chunk_tail_pad_extends_duration() -> None:
 
 def test_dialogue_style_preserves_speech_tail_energy() -> None:
     """Regression: fade-out on the last 12ms used to eat quiet word endings."""
-    _clear_dialogue_env()
+    import numpy as np
 
     def tail_rms(path: Path, ms: float = 15.0) -> float:
-        import numpy as np
-
         proc = subprocess.run(
             [
                 "ffmpeg",
@@ -141,14 +161,19 @@ def test_dialogue_style_preserves_speech_tail_energy() -> None:
         tail = samples[-n:] if samples.size >= n else samples
         return float(np.sqrt(np.mean(tail * tail)))
 
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "in.wav"
-        out = Path(tmp) / "out.wav"
-        make_tone_wav(src, 0.12)
-        in_tail = tail_rms(src)
-        apply_dialogue_style(src, out, 24000)
-        out_tail = tail_rms(out)
-        assert out_tail >= in_tail * 0.75
+    _clear_dialogue_env()
+    os.environ["STORY_VOICE_DIALOGUE_STYLE"] = "1"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.wav"
+            out = Path(tmp) / "out.wav"
+            make_tone_wav(src, 0.12)
+            in_tail = tail_rms(src)
+            apply_dialogue_style(src, out, 24000)
+            out_tail = tail_rms(out)
+            assert out_tail >= in_tail * 0.75
+    finally:
+        os.environ.pop("STORY_VOICE_DIALOGUE_STYLE", None)
 
 
 FFMPEG9_LOUDNORM_STDERR = """[Parsed_loudnorm_0 @ 0xaaaabbbb] 
@@ -204,20 +229,26 @@ def test_loudnorm_fallback_keeps_input_on_failure() -> None:
 
 def test_apply_eq_loudness_match() -> None:
     _clear_dialogue_env()
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "in.wav"
-        out = Path(tmp) / "out.wav"
-        make_tone_wav(src, 0.5)
-        mean_in = volumedetect_mean_db(src)
-        mode = apply_dialogue_style(src, out, 24000)
-        assert mode.startswith("eq")
-        mean_out = volumedetect_mean_db(out)
-        assert abs(mean_out - mean_in) < 1.5
+    os.environ["STORY_VOICE_DIALOGUE_STYLE"] = "1"
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.wav"
+            out = Path(tmp) / "out.wav"
+            make_tone_wav(src, 0.5)
+            mean_in = volumedetect_mean_db(src)
+            mode = apply_dialogue_style(src, out, 24000)
+            assert mode.startswith("eq")
+            mean_out = volumedetect_mean_db(out)
+            assert abs(mean_out - mean_in) < 1.5
+    finally:
+        os.environ.pop("STORY_VOICE_DIALOGUE_STYLE", None)
 
 
 def main() -> int:
-    test_defaults_use_airy_preset()
+    test_defaults_dialogue_post_off()
+    test_enable_dialogue_style_runs_airy_eq()
     test_disable_dialogue_style()
+    test_dialogue_eq_zero_disables_filter()
     test_bright_preset_override()
     assert DEFAULT_CHUNK_TAIL_PAD_SEC > 0
     test_tail_has_limiter_without_fade_out()
