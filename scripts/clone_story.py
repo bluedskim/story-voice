@@ -108,6 +108,10 @@ def synthesize_chunk_to_wav(
     audio = np.concatenate([np.array(r.audio, dtype=np.float32).reshape(-1) for r in results])
     sr = int(getattr(results[0], "sample_rate", getattr(model, "sample_rate", 24000)))
     sf.write(str(out_path), audio, sr)
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from audio_post import apply_chunk_tail_pad
+
+    apply_chunk_tail_pad(out_path, sr)
     post_process_chunk_wav(out_path, role, sr, dialogue_style)
     return sr
 

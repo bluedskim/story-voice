@@ -12,6 +12,7 @@ from pathlib import Path
 
 from audio_quality_config import (
     DIALOGUE_PEAK_LIMITER,
+    chunk_tail_pad_sec,
     dialogue_eq_filter,
     dialogue_fade_sec,
     dialogue_gain_db,
@@ -147,20 +148,42 @@ def build_dialogue_middle_chain(sample_rate: int) -> tuple[str, PitchMethod]:
     return ",".join(parts), pitch_method
 
 
-def build_dialogue_tail_filter(correction_db: float, fade_out_start: float, fade: float) -> str:
-    return (
-        f"volume={correction_db:.4f}dB,{DIALOGUE_PEAK_LIMITER},"
-        f"afade=t=out:st={fade_out_start:.4f}:d={fade:.4f}"
-    )
+def build_dialogue_tail_filter(correction_db: float) -> str:
+    """Loudness correction + peak limit (no fade-out; tail pad preserves word endings)."""
+    return f"volume={correction_db:.4f}dB,{DIALOGUE_PEAK_LIMITER}"
 
 
 def build_dialogue_filter_chain(duration_sec: float, sample_rate: int) -> tuple[str, PitchMethod]:
-    """Full chain for tests (middle + placeholder volume + limiter + fade-out)."""
+    """Full chain for tests (middle + placeholder volume + limiter)."""
     middle, method = build_dialogue_middle_chain(sample_rate)
-    fade = dialogue_fade_sec()
-    fade_out_start = max(0.0, duration_sec - fade)
-    tail = build_dialogue_tail_filter(0.0, fade_out_start, fade)
+    tail = build_dialogue_tail_filter(0.0)
     return f"{middle},{tail}", method
+
+
+def apply_chunk_tail_pad(input_wav: Path, sample_rate: int = 24000) -> None:
+    """Append short silence after each TTS chunk so endings are not clipped in post/concat."""
+    pad = chunk_tail_pad_sec()
+    if pad <= 1e-6:
+        return
+    padded = input_wav.with_suffix(".padded.wav")
+    run_ffmpeg(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(input_wav),
+            "-af",
+            f"apad=pad_dur={pad:.4f}",
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            "1",
+            str(padded),
+        ]
+    )
+    padded.replace(input_wav)
 
 
 def ffmpeg_run_af(input_wav: Path, output_wav: Path, af_chain: str, sample_rate: int) -> None:
@@ -212,9 +235,6 @@ def apply_dialogue_style(input_wav: Path, output_wav: Path, sample_rate: int = 2
         return "none"
 
     mean_in = volumedetect_mean_db(input_wav)
-    duration = probe_duration_sec(input_wav)
-    fade = dialogue_fade_sec()
-    fade_out_start = max(0.0, duration - fade)
     middle_af, pitch_method = build_dialogue_middle_chain(sample_rate)
 
     with tempfile.TemporaryDirectory(prefix="dialogue_af_") as tmp:
@@ -222,7 +242,7 @@ def apply_dialogue_style(input_wav: Path, output_wav: Path, sample_rate: int = 2
         ffmpeg_run_af(input_wav, mid, middle_af, sample_rate)
         mean_mid = volumedetect_mean_db(mid)
         correction_db = mean_in - mean_mid
-        tail = build_dialogue_tail_filter(correction_db, fade_out_start, fade)
+        tail = build_dialogue_tail_filter(correction_db)
         ffmpeg_run_af(mid, output_wav, tail, sample_rate)
 
     if dialogue_eq_filter():

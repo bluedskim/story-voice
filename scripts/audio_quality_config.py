@@ -8,11 +8,14 @@ DEFAULT_MAX_CHARS = 120
 DEFAULT_SENTENCE_PAUSE = 0.35
 DEFAULT_PARAGRAPH_PAUSE = 0.75
 
+# Trailing silence appended to each TTS chunk (protects word endings from EQ/limiter/concat)
+DEFAULT_CHUNK_TAIL_PAD_SEC = 0.06
+
 # Dialogue post-process (EQ by default; pitch/gain optional, default off)
 DEFAULT_DIALOGUE_PITCH_ST = 0.0
 DEFAULT_DIALOGUE_GAIN_DB = 0.0
 DEFAULT_DIALOGUE_FADE_SEC = 0.012
-# Peak limit after loudness match (~-1 dBFS) before fade-out
+# Peak limit after loudness match (~-1 dBFS); chunk tail pad handles concat boundaries
 DIALOGUE_PEAK_LIMITER = "alimiter=limit=0.89:level=false"
 
 DEFAULT_DIALOGUE_EQ_PRESET = "airy"
@@ -64,6 +67,10 @@ def dialogue_gain_db() -> float:
 
 def dialogue_fade_sec() -> float:
     return _float_env("STORY_VOICE_DIALOGUE_FADE_SEC", DEFAULT_DIALOGUE_FADE_SEC)
+
+
+def chunk_tail_pad_sec() -> float:
+    return max(0.0, _float_env("STORY_VOICE_CHUNK_TAIL_PAD_SEC", DEFAULT_CHUNK_TAIL_PAD_SEC))
 
 
 def dialogue_eq_filter() -> str | None:

@@ -14,12 +14,15 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from audio_post import (
     _parse_loudnorm_json,
+    apply_chunk_tail_pad,
     apply_dialogue_style,
     apply_final_loudnorm_if_enabled,
     build_dialogue_middle_chain,
     build_dialogue_tail_filter,
+    probe_duration_sec,
     volumedetect_mean_db,
 )
+from audio_quality_config import DEFAULT_CHUNK_TAIL_PAD_SEC, chunk_tail_pad_sec
 from audio_quality_config import (
     DEFAULT_DIALOGUE_EQ_PRESET,
     DEFAULT_DIALOGUE_GAIN_DB,
@@ -94,10 +97,58 @@ def test_bright_preset_override() -> None:
         os.environ.pop("STORY_VOICE_DIALOGUE_EQ_PRESET", None)
 
 
-def test_tail_includes_limiter_before_fade() -> None:
-    tail = build_dialogue_tail_filter(3.0, 0.4, 0.012)
+def test_tail_has_limiter_without_fade_out() -> None:
+    tail = build_dialogue_tail_filter(3.0)
     assert DIALOGUE_PEAK_LIMITER in tail
-    assert tail.index(DIALOGUE_PEAK_LIMITER) < tail.index("afade=t=out")
+    assert "afade=t=out" not in tail
+
+
+def test_chunk_tail_pad_extends_duration() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.wav"
+        make_tone_wav(src, 0.2)
+        before = probe_duration_sec(src)
+        apply_chunk_tail_pad(src, 24000)
+        after = probe_duration_sec(src)
+        assert after - before >= chunk_tail_pad_sec() - 0.002
+
+
+def test_dialogue_style_preserves_speech_tail_energy() -> None:
+    """Regression: fade-out on the last 12ms used to eat quiet word endings."""
+    _clear_dialogue_env()
+
+    def tail_rms(path: Path, ms: float = 15.0) -> float:
+        import numpy as np
+
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-loglevel",
+                "error",
+                "-i",
+                str(path),
+                "-f",
+                "f32le",
+                "-ac",
+                "1",
+                "-",
+            ],
+            capture_output=True,
+            check=True,
+        )
+        samples = np.frombuffer(proc.stdout, dtype=np.float32)
+        n = int(24000 * ms / 1000.0)
+        tail = samples[-n:] if samples.size >= n else samples
+        return float(np.sqrt(np.mean(tail * tail)))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "in.wav"
+        out = Path(tmp) / "out.wav"
+        make_tone_wav(src, 0.12)
+        in_tail = tail_rms(src)
+        apply_dialogue_style(src, out, 24000)
+        out_tail = tail_rms(out)
+        assert out_tail >= in_tail * 0.75
 
 
 FFMPEG9_LOUDNORM_STDERR = """[Parsed_loudnorm_0 @ 0xaaaabbbb] 
@@ -168,7 +219,10 @@ def main() -> int:
     test_defaults_use_airy_preset()
     test_disable_dialogue_style()
     test_bright_preset_override()
-    test_tail_includes_limiter_before_fade()
+    assert DEFAULT_CHUNK_TAIL_PAD_SEC > 0
+    test_tail_has_limiter_without_fade_out()
+    test_chunk_tail_pad_extends_duration()
+    test_dialogue_style_preserves_speech_tail_energy()
     test_parse_loudnorm_json_ffmpeg9_trailing_lines()
     test_parse_loudnorm_json_brace_noise_before()
     test_loudnorm_fallback_keeps_input_on_failure()

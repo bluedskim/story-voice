@@ -90,7 +90,9 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 | `STORY_VOICE_DIALOGUE_STYLE=0` | 대사 후처리 끔 (`clone_story.py --no-dialogue-style` 동일) |
 | `STORY_VOICE_DIALOGUE_PITCH_ST` / `STORY_VOICE_DIALOGUE_GAIN_DB` | 기본 0 (선택) |
 
-대사 청크 처리 순서: 페이드 인 → (선택) 피치/게인 → EQ → **입력 평균 음량에 맞춤** → 피크 리미터 (`alimiter`, 약 -1 dBFS) → 페이드 아웃.
+각 TTS 청크 끝에 기본 **60ms 무음 패드** (`STORY_VOICE_CHUNK_TAIL_PAD_SEC`, 기본 `0.06`)를 붙여 마지막 음절이 잘리지 않게 합니다.
+
+대사 청크 처리 순서: 페이드 인 → (선택) 피치/게인 → EQ → **입력 평균 음량에 맞춤** → 피크 리미터 (`alimiter`, 약 -1 dBFS). (페이드 아웃은 제거 — concat 직전 무음 패드로 경계 처리)
 
 **이야기 전체 마무리**
 
