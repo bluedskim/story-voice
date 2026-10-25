@@ -12,6 +12,9 @@ from pathlib import Path
 
 from audio_quality_config import (
     DIALOGUE_PEAK_LIMITER,
+    chunk_tail_guard_enabled,
+    chunk_tail_guard_extra_sec,
+    chunk_tail_guard_min_silence_sec,
     chunk_tail_pad_sec,
     dialogue_eq_filter,
     dialogue_fade_sec,
@@ -160,9 +163,68 @@ def build_dialogue_filter_chain(duration_sec: float, sample_rate: int) -> tuple[
     return f"{middle},{tail}", method
 
 
-def apply_chunk_tail_pad(input_wav: Path, sample_rate: int = 24000) -> None:
-    """Append short silence after each TTS chunk so endings are not clipped in post/concat."""
+def load_mono_float_samples(path: Path) -> "np.ndarray":
+    import numpy as np
+
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-i",
+            str(path),
+            "-f",
+            "f32le",
+            "-ac",
+            "1",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    return np.frombuffer(result.stdout, dtype=np.float32)
+
+
+def trailing_silence_sec(samples: "np.ndarray", sample_rate: int, threshold_ratio: float = 0.02) -> float:
+    """Seconds of sub-threshold audio after the last sample above ``threshold_ratio * peak``."""
+    import numpy as np
+
+    if samples.size == 0:
+        return 0.0
+    peak = float(np.max(np.abs(samples)))
+    if peak < 1e-8:
+        return float(samples.size) / sample_rate
+    thresh = peak * threshold_ratio
+    last_speech = 0
+    for i in range(samples.size - 1, -1, -1):
+        if abs(samples[i]) >= thresh:
+            last_speech = i
+            break
+    tail_samples = samples.size - 1 - last_speech
+    return max(0.0, tail_samples / sample_rate)
+
+
+def compute_chunk_tail_pad_sec(input_wav: Path, sample_rate: int = 24000) -> float:
+    """Baseline pad plus optional extra when TTS left little natural trailing silence."""
     pad = chunk_tail_pad_sec()
+    if not chunk_tail_guard_enabled():
+        return pad
+    extra = chunk_tail_guard_extra_sec()
+    if extra <= 1e-6:
+        return pad
+    try:
+        samples = load_mono_float_samples(input_wav)
+        trailing = trailing_silence_sec(samples, sample_rate)
+        if trailing < chunk_tail_guard_min_silence_sec():
+            pad += extra
+    except (OSError, subprocess.CalledProcessError):
+        pad += extra
+    return pad
+
+
+def apply_chunk_tail_pad(input_wav: Path, sample_rate: int = 24000) -> None:
+    """Append silence after chunk post-process (narration + dialogue) before concat."""
+    pad = compute_chunk_tail_pad_sec(input_wav, sample_rate)
     if pad <= 1e-6:
         return
     padded = input_wav.with_suffix(".padded.wav")

@@ -8,8 +8,11 @@ DEFAULT_MAX_CHARS = 120
 DEFAULT_SENTENCE_PAUSE = 0.35
 DEFAULT_PARAGRAPH_PAUSE = 0.75
 
-# Trailing silence appended to each TTS chunk (protects word endings from EQ/limiter/concat)
-DEFAULT_CHUNK_TAIL_PAD_SEC = 0.06
+# Chunk tail: small baseline pad for every line; extra pad when TTS ends "tight" (flaky tails)
+DEFAULT_CHUNK_TAIL_PAD_SEC = 0.025
+DEFAULT_CHUNK_TAIL_GUARD_EXTRA_SEC = 0.035
+DEFAULT_CHUNK_TAIL_GUARD_MIN_SILENCE_SEC = 0.025
+DEFAULT_CHUNK_TAIL_GUARD = True
 
 # Dialogue post-process (opt-in; pitch/gain optional, default off)
 DEFAULT_DIALOGUE_STYLE = False
@@ -72,6 +75,18 @@ def dialogue_fade_sec() -> float:
 
 def chunk_tail_pad_sec() -> float:
     return max(0.0, _float_env("STORY_VOICE_CHUNK_TAIL_PAD_SEC", DEFAULT_CHUNK_TAIL_PAD_SEC))
+
+
+def chunk_tail_guard_extra_sec() -> float:
+    return max(0.0, _float_env("STORY_VOICE_CHUNK_TAIL_GUARD_EXTRA_SEC", DEFAULT_CHUNK_TAIL_GUARD_EXTRA_SEC))
+
+
+def chunk_tail_guard_min_silence_sec() -> float:
+    return max(0.0, _float_env("STORY_VOICE_CHUNK_TAIL_GUARD_MIN_SILENCE_SEC", DEFAULT_CHUNK_TAIL_GUARD_MIN_SILENCE_SEC))
+
+
+def chunk_tail_guard_enabled() -> bool:
+    return _bool_env("STORY_VOICE_CHUNK_TAIL_GUARD", DEFAULT_CHUNK_TAIL_GUARD)
 
 
 def dialogue_eq_filter() -> str | None:
