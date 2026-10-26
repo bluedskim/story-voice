@@ -43,14 +43,19 @@ export async function apiFetch(url, options = {}) {
   return res;
 }
 
-export async function refreshAuthFromConfig() {
+/**
+ * @param {{ notify?: boolean }} [options]
+ *   When notify is false, update auth state without firing onAuthChange (avoids feedback loops).
+ */
+export async function refreshAuthFromConfig(options = {}) {
+  const { notify: shouldNotify = true } = options;
   const res = await fetch("/api/config", { cache: "no-store", credentials: "same-origin" });
   if (!res.ok) throw new Error("config");
   const data = await res.json();
   csrfToken = data.csrfToken || "";
   authEmailDevMode = Boolean(data.authEmailDevMode);
   authUser = data.user || null;
-  notify();
+  if (shouldNotify) notify();
   return data;
 }
 
