@@ -29,7 +29,7 @@ from auth_csrf import CSRF_COOKIE, CSRF_HEADER, new_csrf_token, parse_cookies, v
 from auth_db import AuthDatabase
 from auth_config import ensure_session_secret
 from auth_email import is_log_mail_mode
-from static_assets import inject_asset_versions, web_asset_versions
+from static_assets import app_js_served_body, inject_asset_versions, web_asset_versions
 from auth_service import (
     AuthError,
     login,
@@ -287,11 +287,8 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
 
         if base_route in STATIC_FILES:
             filename, content_type = STATIC_FILES[base_route]
-            file_path = _safe_resolve(WEB_DIR, filename)
-            if file_path is None or not file_path.is_file():
+            if not self._send_static_web_file(filename, content_type):
                 self._send_error(HTTPStatus.NOT_FOUND)
-                return
-            self._send_file(file_path, content_type)
             return
 
         if (
@@ -301,15 +298,14 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         ):
             base = base_route.split("?", 1)[0].lstrip("/")
             if base in {"styles.css", "app.js", "auth.js"}:
-                file_path = _safe_resolve(WEB_DIR, base)
-                if file_path and file_path.is_file():
-                    ctype = (
-                        "text/css; charset=utf-8"
-                        if base.endswith(".css")
-                        else "application/javascript; charset=utf-8"
-                    )
-                    self._send_file(file_path, ctype)
-                    return
+                ctype = (
+                    "text/css; charset=utf-8"
+                    if base.endswith(".css")
+                    else "application/javascript; charset=utf-8"
+                )
+                if not self._send_static_web_file(base, ctype):
+                    self._send_error(HTTPStatus.NOT_FOUND)
+                return
 
         if route.startswith("/audio/"):
             query = parse_qs(parsed.query)
@@ -649,6 +645,23 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             return "invalid"
         end = min(end, file_size - 1)
         return (start, end)
+
+    def _send_static_web_file(self, filename: str, content_type: str) -> bool:
+        file_path = _safe_resolve(WEB_DIR, filename)
+        if file_path is None or not file_path.is_file():
+            return False
+        if filename == "app.js":
+            body = app_js_served_body()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        self._send_file(file_path, content_type)
+        return True
 
     def _send_file(self, file_path: Path, content_type: str, content_disposition: str | None = None) -> None:
         file_size = file_path.stat().st_size

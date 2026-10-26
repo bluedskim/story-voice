@@ -132,10 +132,10 @@ export function initAuthUi() {
   function renderBar() {
     if (!bar) return;
     const loggedIn = Boolean(authUser);
-    loginBtn.hidden = loggedIn;
-    signupBtn.hidden = loggedIn;
-    logoutBtn.hidden = !loggedIn;
-    userLabel.hidden = !loggedIn;
+    if (loginBtn) loginBtn.hidden = loggedIn;
+    if (signupBtn) signupBtn.hidden = loggedIn;
+    if (logoutBtn) logoutBtn.hidden = !loggedIn;
+    if (userLabel) userLabel.hidden = !loggedIn;
     if (loggedIn) {
       userLabel.textContent = authUser.nickname;
     }

@@ -855,6 +855,12 @@ body.is-app-busy #regen-all {
   gap: 0.35rem;
 }
 
+/* `.btn { display: inline-flex }` overrides UA `[hidden]` on some browsers */
+#auth-bar [hidden],
+.btn[hidden] {
+  display: none !important;
+}
+
 .auth-user {
   font-size: 0.9rem;
   color: var(--text-soft);
