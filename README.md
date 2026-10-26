@@ -123,11 +123,12 @@ python scripts/serve.py
 - 생성은 **단일 MLX 워커**(작업 1개씩, 대기열 최대 2). 회원별·기본 낭독 작업이 같은 큐를 공유합니다.
 - IP당 요청 제한·업로드 상한 (`CF-Connecting-IP` 지원).
 
-#### 저장소 (로컬, git 제외)
+#### 저장소 (로컬)
 
 | 경로 | 용도 |
 |------|------|
-| `data/voice/default/` | **기본 낭독** 참조 (`default-narration-source.wav` 또는 `reference.wav`, `reference.txt`) — [`data/voice/default/README.md`](data/voice/default/README.md) |
+| `data/voice/default/default-narration-source.wav` | **기본 낭독** 참조 원본 — **git에 포함** (배포 시 `git pull`로 동봉) |
+| `data/voice/default/reference.wav` / `reference.txt` | 서버가 첫 생성 시 만드는 로컬 파일 (git 제외) — [`data/voice/default/README.md`](data/voice/default/README.md) |
 | `data/audio/default/<id>.m4a` | 카탈로그 전체용 **공용** 기본 낭독 (회원 가입 시 없으면 서버가 생성 요청) |
 | `data/users/<userId>/voice/` | 회원 **개인** 참조 음성 + `history/` 백업 |
 | `data/users/<userId>/audio/<id>.m4a` | 회원 **개인** 낭독 (있으면 재생 시 기본보다 우선) |
@@ -135,11 +136,11 @@ python scripts/serve.py
 
 재생 우선순위: **개인 m4a → 기본 m4a**. 다른 회원의 개인 파일은 제공하지 않습니다.
 
-#### 기본 낭독 목소리 배치 (운영)
+#### 기본 낭독 목소리
 
-1. `data/voice/default/default-narration-source.wav` (약 24초 PCM)를 서버에 복사합니다 (저장소에 wav는 올리지 않음).
-2. `reference.txt`는 없으면 `content/record_script.txt`와 동일한 받아쓰기로 자동 생성됩니다.
-3. 서버 기동·신규 가입 시 빠진 `data/audio/default/*.m4a`를 **한 번씩** 생성합니다.
+- `data/voice/default/default-narration-source.wav`는 **저장소에 커밋**되어 있습니다. 별도 복사 없이 `git pull`로 Mac mini에 받습니다.
+- `reference.txt`는 없으면 `content/record_script.txt`와 동일한 받아쓰기로 자동 생성됩니다.
+- 서버 기동·신규 가입 시 빠진 `data/audio/default/*.m4a`를 **한 번씩** 생성합니다.
 
 #### 계정·권한
 
@@ -197,12 +198,14 @@ python scripts/test_per_user_audio.py
 
 ```bash
 cd ~/story-voice
-git pull
+git pull   # 기본 낭독 원본 default-narration-source.wav 포함
 source .venv/bin/activate
 uv pip install -r requirements-mlx.txt
 # launchd 재시작 (사용 중인 방법에 맞게)
 launchctl kickstart -k gui/$(id -u)/app.baem.story-voice
 ```
+
+`git pull` 후 `data/voice/default/default-narration-source.wav`가 있어야 합니다. 없으면 브랜치/릴리스가 오래됐거나 sparse checkout을 확인하세요. 개인 목소리·생성 m4a·`data/users/`는 여전히 로컬만입니다.
 
 Tunnel은 `http://127.0.0.1:8765` 를 `https://story-voice.baem.app` 등으로 노출합니다. `serve.py`는 기본 `127.0.0.1`에만 바인드합니다.
 
