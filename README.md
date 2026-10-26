@@ -192,6 +192,7 @@ python scripts/test_voice_upload_flow.py
 python scripts/test_per_user_audio.py
 python scripts/test_user_public.py
 python scripts/test_static_assets.py
+python scripts/test_user_reference_version.py
 ```
 
 ### 6. Mac mini 배포 (launchd + Tunnel)

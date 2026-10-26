@@ -64,6 +64,8 @@ let mediaRecorder = null;
 let recordChunks = [];
 let pendingBlob = null;
 let pendingToken = null;
+let voiceReferenceBust = 0;
+let previewObjectUrl = null;
 
 function motifFor(id) {
   return STORY_MOTIFS[id] || "📖";
@@ -115,7 +117,11 @@ async function loadConfig() {
   const data = await refreshAuthFromConfig();
   recordScriptEl.value = data.recordScript || "";
   hasPersonalVoice = Boolean(data.hasPersonalVoice);
+  if (data.voiceReferenceVersion) {
+    voiceReferenceBust = data.voiceReferenceVersion;
+  }
   updateWriteGates();
+  syncSavedVoicePreview();
 }
 
 function updateWriteGates() {
@@ -143,6 +149,7 @@ function updateWriteGates() {
 onAuthChange(() => {
   updateWriteGates();
   loadCatalog().catch(() => {});
+  loadConfig().catch(() => {});
 });
 
 function probeDuration(story) {
@@ -504,6 +511,48 @@ function pickRecorderMime() {
   return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
 }
 
+function revokePreviewObjectUrl() {
+  if (previewObjectUrl) {
+    URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = null;
+  }
+}
+
+function savedVoicePreviewUrl() {
+  const bust = voiceReferenceBust || Date.now();
+  return `/api/voice/reference.wav?v=${bust}`;
+}
+
+function setPreviewToPending(blob) {
+  revokePreviewObjectUrl();
+  previewObjectUrl = URL.createObjectURL(blob);
+  previewEl.src = previewObjectUrl;
+  previewPlayerUi.hidden = false;
+  previewPlayBtn.textContent = playIcon(false);
+  previewTimeEl.textContent = "0:00";
+}
+
+function setPreviewToSavedReference(bust) {
+  revokePreviewObjectUrl();
+  if (bust) voiceReferenceBust = bust;
+  previewEl.src = savedVoicePreviewUrl();
+  previewPlayerUi.hidden = false;
+  previewPlayBtn.textContent = playIcon(false);
+  previewTimeEl.textContent = "0:00";
+  previewEl.load();
+}
+
+function syncSavedVoicePreview() {
+  if (pendingBlob) return;
+  if (!hasPersonalVoice || !canWrite()) {
+    revokePreviewObjectUrl();
+    previewEl.removeAttribute("src");
+    previewPlayerUi.hidden = true;
+    return;
+  }
+  setPreviewToSavedReference(voiceReferenceBust);
+}
+
 function resetVoiceReview() {
   pendingToken = null;
   voiceReviewEl.hidden = true;
@@ -540,7 +589,7 @@ async function startRecording() {
     stream.getTracks().forEach((t) => t.stop());
     const type = mediaRecorder.mimeType || "audio/mp4";
     pendingBlob = new Blob(recordChunks, { type });
-    previewEl.src = URL.createObjectURL(pendingBlob);
+    setPreviewToPending(pendingBlob);
     onAudioReady();
   };
   mediaRecorder.start();
@@ -561,7 +610,7 @@ function stopRecording() {
 function onFileSelected(file) {
   if (!file) return;
   pendingBlob = file;
-  previewEl.src = URL.createObjectURL(file);
+  setPreviewToPending(file);
   onAudioReady();
   voiceMsgEl.textContent = `${file.name} — 미리 듣고 ‘받아쓰기 확인’을 눌러 주세요.`;
 }
@@ -645,7 +694,8 @@ async function saveVoice() {
   prepareVoiceBtn.disabled = true;
   saveVoiceBtn.disabled = false;
   voiceReviewEl.hidden = true;
-  previewPlayerUi.hidden = true;
+  const bust = data.referenceVersion || Date.now();
+  setPreviewToSavedReference(bust);
   setVoiceStep(3);
 }
 

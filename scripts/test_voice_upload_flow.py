@@ -152,6 +152,14 @@ def test_prepare_and_confirm_integration() -> None:
                 assert ref_wav.is_file()
                 history = list((users_root / str(uid) / "voice" / "history").glob("*"))
                 assert history, "expected backup dir"
+                confirm = json.loads(res2.read().decode())
+                assert confirm.get("referenceVersion")
+                ref_get = http("GET", "/api/voice/reference.wav", headers=write_hdrs)
+                assert ref_get.status == 200
+                assert ref_get.headers.get("Content-Type", "").startswith("audio/wav")
+                assert len(ref_get.read()) > 100
+                cfg = json.loads(http("GET", "/api/config", headers=write_hdrs).read().decode())
+                assert cfg.get("voiceReferenceVersion") == confirm["referenceVersion"]
 
             try:
                 http(
