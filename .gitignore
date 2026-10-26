@@ -6,6 +6,9 @@ data/.session_secret
 # Local voice data (never commit recordings)
 data/voice/*
 !data/voice/README.md
+!data/voice/default/
+data/voice/default/*
+!data/voice/default/README.md
 data/voice/history/
 data/recordings/
 recordings/
@@ -13,6 +16,12 @@ recordings/
 # Generated story audio
 data/audio/*
 !data/audio/.gitkeep
+!data/audio/default/
+data/audio/default/*
+!data/audio/default/.gitkeep
+
+# Per-user voice and generated audio
+data/users/
 
 # Generation temp files
 out/

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import hashlib
 import hmac
 import os
@@ -60,8 +61,8 @@ def warn_if_no_admin_emails() -> None:
     if admin_emails():
         return
     print(
-        "WARNING: STORY_VOICE_ADMIN_EMAILS is empty — no operator accounts; "
-        "voice upload and story generation are disabled for everyone.",
+        "WARNING: STORY_VOICE_ADMIN_EMAILS is empty — no operator accounts in env "
+        "(members can still save voice and generate their own audio).",
         file=sys.stderr,
     )
 
@@ -71,10 +72,11 @@ def user_public(user: UserRow) -> dict:
     return {
         "email": user.email,
         "nickname": user.nickname,
+        "userId": user.id,
         "role": USER_TYPE_ADMIN if is_admin else USER_TYPE_MEMBER,
         "roleLabel": "운영자" if is_admin else "회원",
         "isAdmin": is_admin,
-        "canWrite": is_admin,
+        "canWrite": True,
     }
 
 
@@ -157,6 +159,7 @@ def signup(
     password: str,
     verification_code: str,
     client_ip: str,
+    after_create: Callable[[UserRow], None] | None = None,
 ) -> UserRow:
     email = normalize_email(login_id)
     nickname = validate_nickname(nickname)
@@ -182,7 +185,10 @@ def signup(
         raise AuthError("인증코드가 맞지 않아요.", "invalid_code", 400)
 
     db.delete_verification(email)
-    return db.create_user(email, nickname, hash_password(password), USER_TYPE_MEMBER)
+    user = db.create_user(email, nickname, hash_password(password), USER_TYPE_MEMBER)
+    if after_create:
+        after_create(user)
+    return user
 
 
 def login(db: AuthDatabase, login_id: str, password: str) -> tuple[str, UserRow]:

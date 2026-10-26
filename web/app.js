@@ -51,6 +51,7 @@ const STORY_MOTIFS = {
 };
 
 let catalog = [];
+let hasPersonalVoice = false;
 let activeId = null;
 let activeStory = null;
 let audioCacheBust = Date.now();
@@ -113,6 +114,7 @@ function setAppBusy(busy) {
 async function loadConfig() {
   const data = await refreshAuthFromConfig();
   recordScriptEl.value = data.recordScript || "";
+  hasPersonalVoice = Boolean(data.hasPersonalVoice);
   updateWriteGates();
 }
 
@@ -138,7 +140,10 @@ function updateWriteGates() {
   });
 }
 
-onAuthChange(() => updateWriteGates());
+onAuthChange(() => {
+  updateWriteGates();
+  loadCatalog().catch(() => {});
+});
 
 function probeDuration(story) {
   if (!story.hasAudio || durationCache[story.id]) return;
@@ -163,10 +168,11 @@ function probeDuration(story) {
 async function loadCatalog() {
   listEl.innerHTML = '<p class="loading">이야기를 불러오는 중…</p>';
   try {
-    const res = await fetch("catalog.json", { cache: "no-store" });
-    if (!res.ok) throw new Error(`catalog.json ${res.status}`);
+    const res = await apiFetch("/api/catalog", { cache: "no-store" });
+    if (!res.ok) throw new Error(`/api/catalog ${res.status}`);
     const data = await res.json();
     catalog = data.stories || [];
+    hasPersonalVoice = Boolean(data.hasPersonalVoice);
     render();
     catalog.forEach(probeDuration);
   } catch (err) {
@@ -181,6 +187,7 @@ function render() {
     card.className = "story-card";
     card.dataset.id = story.id;
     if (!story.hasAudio) card.classList.add("is-missing");
+    else if (story.audioSource === "default") card.classList.add("is-default-audio");
 
     const motif = document.createElement("div");
     motif.className = "story-motif";
@@ -198,7 +205,13 @@ function render() {
     meta.className = "story-meta";
     const badge = document.createElement("span");
     badge.className = "story-badge";
-    badge.textContent = story.hasAudio ? "듣을 수 있어요" : "만들기 전";
+    if (!story.hasAudio) {
+      badge.textContent = "준비 중";
+    } else if (story.audioSource === "personal") {
+      badge.textContent = "내 목소리";
+    } else {
+      badge.textContent = "기본 낭독";
+    }
     const dur = document.createElement("span");
     dur.className = "story-duration";
     dur.dataset.id = story.id;
@@ -207,14 +220,24 @@ function render() {
 
     const status = document.createElement("p");
     status.className = "story-status";
-    status.textContent = story.hasAudio ? "재생할 준비됐어요" : "목소리 저장 후 만들어 주세요";
+    if (!story.hasAudio) {
+      status.textContent = "기본 낭독을 준비하는 중이에요. 잠시만 기다려 주세요.";
+    } else if (story.audioSource === "personal") {
+      status.textContent = "내 목소리로 재생할 준비됐어요";
+    } else {
+      status.textContent = "기본 낭독으로 들을 수 있어요. 내 목소리는 목소리 탭에서 저장 후 만들 수 있어요.";
+    }
 
     const regen = document.createElement("button");
     regen.type = "button";
     regen.className = "btn btn-secondary regen-btn";
-    regen.textContent = "다시 만들기";
+    const personalLabel = story.hasPersonalAudio ? "내 목소리로 다시 만들기" : "내 목소리로 만들기";
+    regen.textContent = personalLabel;
     regen.addEventListener("click", () => enqueueStory(story.id));
-    regen.disabled = !canWrite();
+    regen.disabled = !canWrite() || !hasPersonalVoice;
+    if (!hasPersonalVoice) {
+      regen.title = "목소리 탭에서 내 목소리를 먼저 저장해 주세요";
+    }
 
     const actions = document.createElement("div");
     actions.className = "story-actions";
@@ -616,6 +639,7 @@ async function saveVoice() {
     voiceMsgEl.className = "voice-msg is-warn";
   }
   voiceMsgEl.textContent = msg;
+  hasPersonalVoice = true;
   pendingBlob = null;
   pendingToken = null;
   prepareVoiceBtn.disabled = true;

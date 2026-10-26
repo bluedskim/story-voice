@@ -52,7 +52,9 @@ from http_utils import (
     send_json,
 )
 from rate_limit import RateLimiter
-from story_catalog import write_manifest
+from story_catalog import build_manifest, build_public_catalog, write_manifest
+from default_narration import resolve_story_audio_path
+from user_storage import has_user_reference, migrate_legacy_voice_for_admin
 from voice_service import (
     MAX_UPLOAD_BYTES,
     MIN_DURATION_SEC,
@@ -104,39 +106,26 @@ def _safe_resolve(base: Path, name: str) -> Path | None:
         return None
 
 
-def load_catalog_audio() -> tuple[set[str], dict[str, str]]:
-    if not MANIFEST_PATH.is_file():
-        return set(), {}
-    try:
-        data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return set(), {}
-    allowed: set[str] = set()
-    titles: dict[str, str] = {}
-    for story in data.get("stories", []):
-        story_id = story.get("id")
-        if not story_id or not STORY_ID_RE.match(story_id):
-            continue
-        if story.get("hasAudio"):
-            allowed.add(story_id)
-            titles[story_id] = story.get("title") or story_id
-    return allowed, titles
+def story_titles_map() -> dict[str, str]:
+    from story_catalog import list_stories
+
+    return {s.id: s.title for s in list_stories()}
 
 
 class AppState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
-        self.allowed_audio_ids: set[str] = set()
-        self.story_titles: dict[str, str] = {}
         self.auth_db = AuthDatabase()
 
-        def refresh() -> None:
+        def refresh_catalog(_user_id: int | None = None) -> None:
             write_manifest(MANIFEST_PATH)
-            with self.lock:
-                self.allowed_audio_ids, self.story_titles = load_catalog_audio()
 
-        refresh()
-        self.generation = GenerationService(on_catalog_refresh=refresh)
+        refresh_catalog()
+        self.generation = GenerationService(on_catalog_refresh=refresh_catalog)
+        try:
+            self.generation.enqueue_missing_default_stories()
+        except RuntimeError:
+            pass
 
 
 class StoryVoiceHandler(BaseHTTPRequestHandler):
@@ -162,7 +151,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _require_admin_write(self):
+    def _require_logged_in(self):
         user = self._current_user()
         if not user:
             send_json(
@@ -171,17 +160,20 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 {"error": "로그인이 필요해요.", "code": "auth_required"},
             )
             return None
-        if not user_is_admin(user):
-            send_json(
-                self,
-                HTTPStatus.FORBIDDEN,
-                {
-                    "error": "가족 목소리 저장·이야기 만들기는 관리자만 할 수 있어요.",
-                    "code": "forbidden",
-                },
-            )
-            return None
         return user
+
+    def _require_personal_voice(self, user):
+        if has_user_reference(user.id):
+            return True
+        send_json(
+            self,
+            HTTPStatus.BAD_REQUEST,
+            {
+                "error": "먼저 목소리 탭에서 내 목소리를 저장해 주세요. 지금은 기본 낭독만 들을 수 있어요.",
+                "code": "need_personal_voice",
+            },
+        )
+        return False
 
     def _csrf_token_for_config(self) -> str:
         cookies = parse_cookies(self)
@@ -213,6 +205,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                         "maxUploadBytes": MAX_UPLOAD_BYTES,
                     },
                     "user": user_public(user) if user else None,
+                    "hasPersonalVoice": has_user_reference(user.id) if user else False,
                 },
                 set_cookies=[make_csrf_cookie(csrf, self)],
             )
@@ -237,12 +230,28 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, {"available": available})
             return
 
+        if route == "/api/catalog":
+            user = self._current_user()
+            if not user:
+                send_json(self, HTTPStatus.OK, build_public_catalog())
+                return
+            send_json(self, HTTPStatus.OK, build_manifest(user_id=user.id))
+            return
+
         if route == "/api/voice":
-            send_json(self, HTTPStatus.OK, {"hasReference": has_reference()})
+            user = self._current_user()
+            if not user:
+                send_json(self, HTTPStatus.OK, {"hasReference": False, "requiresLogin": True})
+                return
+            if user_is_admin(user):
+                migrate_legacy_voice_for_admin(user.id)
+            send_json(self, HTTPStatus.OK, {"hasReference": has_reference(user.id)})
             return
 
         if route == "/api/generation/status":
-            send_json(self, HTTPStatus.OK, self.app.generation.status_snapshot())
+            user = self._current_user()
+            uid = user.id if user else None
+            send_json(self, HTTPStatus.OK, self.app.generation.status_snapshot(uid))
             return
 
         base_route = route.split("?", 1)[0]
@@ -349,6 +358,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                     body.get("password") or "",
                     (body.get("verificationCode") or "").strip(),
                     ip,
+                    after_create=lambda _u: self._schedule_default_narrations(),
                 )
                 send_json(self, HTTPStatus.CREATED, {"user": user_public(user)})
             except AuthError as exc:
@@ -404,9 +414,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if not self._ensure_csrf():
                 return
-            if self._require_admin_write() is None:
+            user = self._require_logged_in()
+            if user is None:
                 return
-            self._handle_voice_prepare()
+            self._handle_voice_prepare(user)
             return
 
         if route == "/api/voice/confirm":
@@ -415,9 +426,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if not self._ensure_csrf():
                 return
-            if self._require_admin_write() is None:
+            user = self._require_logged_in()
+            if user is None:
                 return
-            self._handle_voice_confirm()
+            self._handle_voice_confirm(user)
             return
 
         if route == "/api/voice":
@@ -438,7 +450,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if not self._ensure_csrf():
                 return
-            if self._require_admin_write() is None:
+            user = self._require_logged_in()
+            if user is None:
+                return
+            if not self._require_personal_voice(user):
                 return
             body = read_json_body(self)
             if body is None:
@@ -450,7 +465,12 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.BAD_REQUEST, {"error": "asrVerify는 true 또는 false여야 해요."})
                 return
             try:
-                result = self.app.generation.enqueue_story(story_id, asr_verify_request=asr_flag)
+                result = self.app.generation.enqueue_story(
+                    story_id,
+                    user.id,
+                    is_admin=user_is_admin(user),
+                    asr_verify_request=asr_flag,
+                )
                 self._send_enqueue_result(result)
             except StoryNotFoundError:
                 send_json(self, HTTPStatus.NOT_FOUND, {"error": "이야기를 찾을 수 없어요."})
@@ -464,7 +484,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if not self._ensure_csrf():
                 return
-            if self._require_admin_write() is None:
+            user = self._require_logged_in()
+            if user is None:
+                return
+            if not self._require_personal_voice(user):
                 return
             body = read_json_body(self)
             if body is None:
@@ -476,7 +499,11 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.BAD_REQUEST, {"error": "asrVerify는 true 또는 false여야 해요."})
                 return
             try:
-                result = self.app.generation.enqueue_all(asr_verify_request=asr_flag)
+                result = self.app.generation.enqueue_all(
+                    user.id,
+                    is_admin=user_is_admin(user),
+                    asr_verify_request=asr_flag,
+                )
                 self._send_enqueue_result(result)
             except RuntimeError as exc:
                 send_json(self, HTTPStatus.CONFLICT, {"error": str(exc)})
@@ -484,7 +511,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
 
         self._send_error(HTTPStatus.NOT_FOUND)
 
-    def _handle_voice_prepare(self) -> None:
+    def _handle_voice_prepare(self, user) -> None:
         if self.app.generation.is_generating():
             send_json(
                 self,
@@ -508,14 +535,14 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             tmp.write(audio_data)
             tmp_path = Path(tmp.name)
         try:
-            result = prepare_voice_upload(tmp_path, len(audio_data))
+            result = prepare_voice_upload(user.id, tmp_path, len(audio_data))
             send_json(self, HTTPStatus.OK, result)
         except VoiceSaveError as exc:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    def _handle_voice_confirm(self) -> None:
+    def _handle_voice_confirm(self, user) -> None:
         body = read_json_body(self, max_bytes=256_000)
         if body is None:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
@@ -526,13 +553,19 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": "확인 코드가 없어요."})
             return
         try:
-            result = confirm_voice_upload(token, transcript)
+            result = confirm_voice_upload(user.id, token, transcript)
             send_json(self, HTTPStatus.OK, result)
         except VoiceSaveError as exc:
             status = HTTPStatus.BAD_REQUEST
             if exc.code in {"expired_token", "invalid_token"}:
                 status = HTTPStatus.GONE
             send_json(self, status, {"error": str(exc), "code": exc.code})
+
+    def _schedule_default_narrations(self) -> None:
+        try:
+            self.app.generation.enqueue_missing_default_stories()
+        except RuntimeError:
+            pass
 
     def _send_enqueue_result(self, result: EnqueueResult) -> None:
         job = result.job
@@ -546,6 +579,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, payload)
 
     def _serve_audio(self, route: str, as_download: bool = False) -> None:
+        user = self._current_user()
+        if not user:
+            self._send_error(HTTPStatus.UNAUTHORIZED)
+            return
         name = route[len("/audio/") :]
         if "/" in name or name != Path(name).name:
             self._send_error(HTTPStatus.NOT_FOUND)
@@ -557,13 +594,15 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         if not STORY_ID_RE.match(story_id):
             self._send_error(HTTPStatus.NOT_FOUND)
             return
-        with self.app.lock:
-            allowed = set(self.app.allowed_audio_ids)
-            titles = dict(self.app.story_titles)
-        if story_id not in allowed:
+        titles = story_titles_map()
+        if story_id not in titles:
             self._send_error(HTTPStatus.NOT_FOUND)
             return
-        file_path = _safe_resolve(AUDIO_DIR, name)
+        resolved = resolve_story_audio_path(user.id, story_id)
+        if resolved is None:
+            self._send_error(HTTPStatus.NOT_FOUND)
+            return
+        file_path = _safe_resolve(resolved.parent, resolved.name)
         if file_path is None or not file_path.is_file():
             self._send_error(HTTPStatus.NOT_FOUND)
             return
@@ -687,7 +726,6 @@ def main() -> None:
 
     url = f"http://localhost:{args.port}/"
     print(f"story-voice at {url}", file=sys.stderr)
-    print(f"Audio ids: {len(app_state.allowed_audio_ids)}", file=sys.stderr)
     gen = os.environ.get("STORY_VOICE_GENERATOR", "mlx")
     print(f"Generator: {gen}", file=sys.stderr)
     try:

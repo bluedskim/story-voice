@@ -27,6 +27,8 @@ class GenerationBackend(ABC):
         on_progress: ProgressCallback,
         *,
         verify_asr: bool = False,
+        ref_wav: Path | None = None,
+        ref_txt: Path | None = None,
     ) -> None:
         pass
 
@@ -72,6 +74,8 @@ class FakeGenerationBackend(GenerationBackend):
         on_progress: ProgressCallback,
         *,
         verify_asr: bool = False,
+        ref_wav: Path | None = None,
+        ref_txt: Path | None = None,
     ) -> None:
         self.last_verify_asr = verify_asr
         from audio_quality_config import DEFAULT_MAX_CHARS
@@ -110,15 +114,21 @@ class MLXGenerationBackend(GenerationBackend):
         on_progress: ProgressCallback,
         *,
         verify_asr: bool = False,
+        ref_wav: Path | None = None,
+        ref_txt: Path | None = None,
     ) -> None:
-        from clone_story import split_sentences, DEFAULT_MAX_CHARS
+        from clone_story import DEFAULT_REF_TEXT, DEFAULT_REF_WAV, load_ref_text, split_sentences, DEFAULT_MAX_CHARS
 
+        wav = ref_wav or DEFAULT_REF_WAV
+        txt_path = ref_txt or DEFAULT_REF_TEXT
         total = len(split_sentences(story_text, DEFAULT_MAX_CHARS)) or 1
 
         def on_chunk(current: int, _total: int) -> None:
             on_progress(current, total, story_id)
 
         generator = self._get_generator()
+        generator.ref_audio = wav
+        generator.ref_text = load_ref_text(txt_path)
         generator.narration_config.verify_asr = verify_asr
         generator.generate_story(story_text, output_path, on_progress=on_chunk)
 
