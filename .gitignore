@@ -9,6 +9,7 @@ data/voice/*
 !data/voice/default/
 data/voice/default/*
 !data/voice/default/README.md
+!data/voice/default/default-narration-source.wav
 data/voice/history/
 data/recordings/
 recordings/
@@ -32,6 +33,7 @@ web/catalog.json
 *.m4a
 *.wav
 !web/**/*.wav
+!data/voice/default/default-narration-source.wav
 
 # Python
 .venv/
