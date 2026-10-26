@@ -64,6 +64,14 @@ def has_user_reference(user_id: int) -> bool:
     return user_ref_wav(user_id).is_file() and user_ref_txt(user_id).is_file()
 
 
+def user_reference_version(user_id: int) -> int | None:
+    """Millisecond cache-bust token from reference.wav mtime (None if missing)."""
+    wav = user_ref_wav(user_id)
+    if not wav.is_file():
+        return None
+    return int(wav.stat().st_mtime * 1000)
+
+
 def _legacy_voice_complete() -> bool:
     return LEGACY_REF_WAV.is_file() and LEGACY_REF_TXT.is_file()
 

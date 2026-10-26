@@ -1,6 +1,7 @@
 {
-  "name": "잠자리 이야기",
-  "short_name": "잠자리",
+  "name": "story-voice",
+  "short_name": "story-voice",
+  "description": "녹음한 목소리로 만든 이야기를 언제 어디서나 들어요",
   "display": "standalone",
   "start_url": "/",
   "theme_color": "#1a2240",

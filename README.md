@@ -1,15 +1,15 @@
 # story-voice
 
 * 슬로건: Your voice. Their stories.
-* 한줄: 부모의 목소리로 듣는 동화·학습 라이브러리
-* 영문: A story library that reads in a parent’s voice
-* 방식: voice cloning. 부모 목소리 샘플로 동화 전체를 읽게 한다.
+* 한줄: 녹음한 목소리로 만든 이야기를 언제 어디서나 들을 수 있는 서비스
+* 영문: Stories narrated in your recorded voice — listen anytime, anywhere
+* 방식: voice cloning. 짧은 목소리 샘플로 이야기 전체를 읽게 한다.
 * 실행: 로컬 모델. Mac Mini M2에서 MLX로 돌린다.
 * 모델: Qwen3-TTS 12Hz Base. 한국어와 짧은 샘플 클로닝을 지원하고, 라이선스는 Apache 2.0이다.
 
 ## 지금 단계
 
-검증을 통과했어요. 이제 **얇은 제품** — 목소리 하나, 동화 몇 편, 재생 버튼 — 을 Mac mini에서 돌립니다. 계정·결제·학습 콘텐츠는 그다음입니다.
+검증을 통과했어요. 이제 **얇은 제품** — 목소리 하나, 이야기 몇 편, 재생 버튼 — 을 Mac mini에서 돌립니다. 계정·결제·추가 콘텐츠는 그다음입니다.
 
 ## 빠른 시작 (Mac mini)
 
@@ -27,7 +27,7 @@ source .venv/bin/activate
 uv pip install -r requirements-mlx.txt
 ```
 
-### 2. 부모 목소리 준비
+### 2. 목소리 녹음 준비
 
 녹음 대본: [`content/record_script.txt`](content/record_script.txt). 자세한 팁은 [`content/recording_guide.md`](content/recording_guide.md).
 
@@ -192,6 +192,7 @@ python scripts/test_voice_upload_flow.py
 python scripts/test_per_user_audio.py
 python scripts/test_user_public.py
 python scripts/test_static_assets.py
+python scripts/test_user_reference_version.py
 ```
 
 ### 6. Mac mini 배포 (launchd + Tunnel)
@@ -234,7 +235,7 @@ Tunnel은 `http://127.0.0.1:8765` 를 `https://story-voice.baem.app` 등으로 �
 
 ## 검증 (완료)
 
-Mac mini M2 (16GB), `Qwen3-TTS-12Hz-1.7B-Base-8bit`, mlx-audio 0.6.0, Python 3.12 — 약 23초 샘플+받아쓰기로 「의좋은 형제」 전편(약 1분 41초) 낭독이 잠자리용으로 통과했습니다.
+Mac mini M2 (16GB), `Qwen3-TTS-12Hz-1.7B-Base-8bit`, mlx-audio 0.6.0, Python 3.12 — 약 23초 샘플+받아쓰기로 「의좋은 형제」 전편(약 1분 41초) 낭독 품질 검증을 통과했습니다.
 
 ## 로컬 모델
 

@@ -54,7 +54,12 @@ from http_utils import (
 from rate_limit import RateLimiter
 from story_catalog import build_manifest, build_public_catalog, write_manifest
 from default_narration import resolve_story_audio_path
-from user_storage import has_user_reference, migrate_legacy_voice_for_admin
+from user_storage import (
+    has_user_reference,
+    migrate_legacy_voice_for_admin,
+    user_ref_wav,
+    user_reference_version,
+)
 from voice_service import (
     MAX_UPLOAD_BYTES,
     MIN_DURATION_SEC,
@@ -206,6 +211,11 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                     },
                     "user": user_public(user) if user else None,
                     "hasPersonalVoice": has_user_reference(user.id) if user else False,
+                    "voiceReferenceVersion": (
+                        user_reference_version(user.id)
+                        if user and has_user_reference(user.id)
+                        else None
+                    ),
                 },
                 set_cookies=[make_csrf_cookie(csrf, self)],
             )
@@ -238,6 +248,23 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             send_json(self, HTTPStatus.OK, build_manifest(user_id=user.id))
             return
 
+        if route == "/api/voice/reference.wav":
+            user = self._current_user()
+            if not user:
+                self._send_error(HTTPStatus.UNAUTHORIZED)
+                return
+            if user_is_admin(user):
+                migrate_legacy_voice_for_admin(user.id)
+            if not has_user_reference(user.id):
+                self._send_error(HTTPStatus.NOT_FOUND)
+                return
+            file_path = _safe_resolve(user_ref_wav(user.id).parent, user_ref_wav(user.id).name)
+            if file_path is None or not file_path.is_file():
+                self._send_error(HTTPStatus.NOT_FOUND)
+                return
+            self._send_file(file_path, "audio/wav")
+            return
+
         if route == "/api/voice":
             user = self._current_user()
             if not user:
@@ -245,7 +272,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if user_is_admin(user):
                 migrate_legacy_voice_for_admin(user.id)
-            send_json(self, HTTPStatus.OK, {"hasReference": has_reference(user.id)})
+            payload = {"hasReference": has_reference(user.id)}
+            if has_user_reference(user.id):
+                payload["referenceVersion"] = user_reference_version(user.id)
+            send_json(self, HTTPStatus.OK, payload)
             return
 
         if route == "/api/generation/status":
@@ -550,6 +580,8 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             return
         try:
             result = confirm_voice_upload(user.id, token, transcript)
+            if has_user_reference(user.id):
+                result["referenceVersion"] = user_reference_version(user.id)
             send_json(self, HTTPStatus.OK, result)
         except VoiceSaveError as exc:
             status = HTTPStatus.BAD_REQUEST
