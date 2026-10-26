@@ -145,7 +145,7 @@ def test_chunk_lead_cleanup_removes_pre_speech_click() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "clicky.wav"
         n_lead = int(0.02 * sr)
-        n_click = int(0.06 * sr)
+        n_click = int(0.025 * sr)
         n_gap = int(0.04 * sr)
         n_speech = int(0.25 * sr)
         total = n_lead + n_click + n_gap + n_speech
@@ -169,6 +169,32 @@ def test_chunk_lead_cleanup_removes_pre_speech_click() -> None:
         assert before > 0.2
         assert after < before * 0.08
         assert speech_peak > 0.05
+
+
+def test_chunk_lead_preserves_soft_onset() -> None:
+    """Regression: lead-strip must not zero quiet attack / first syllable before sustained hold."""
+    import numpy as np
+    import wave
+
+    sr = 24000
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "soft.wav"
+        n = int(0.35 * sr)
+        t = np.arange(n, dtype=np.float64) / sr
+        env = np.linspace(0.03, 0.28, n, dtype=np.float32)
+        sig = (env * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        early = slice(0, int(0.06 * sr))
+        before_peak = float(np.max(np.abs(sig[early])))
+        with wave.open(str(src), "w") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes((sig * 32767).astype(np.int16).tobytes())
+        apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
+        out = load_mono_float_samples(src)
+        after_peak = float(np.max(np.abs(out[early])))
+        assert before_peak > 0.01
+        assert after_peak >= before_peak * 0.45
 
 
 def test_chunk_tail_pad_extends_duration() -> None:
@@ -450,6 +476,7 @@ def main() -> int:
     assert DEFAULT_CHUNK_TAIL_PAD_SEC > 0
     test_tail_has_limiter_without_fade_out()
     test_chunk_lead_cleanup_removes_pre_speech_click()
+    test_chunk_lead_preserves_soft_onset()
     test_chunk_tail_pad_extends_duration()
     test_tail_guard_extra_on_tight_tts_end()
     test_tail_guard_skips_extra_when_trailing_silence_present()

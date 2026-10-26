@@ -270,27 +270,85 @@ def _write_mono_wav(path: Path, samples: "np.ndarray", sample_rate: int) -> None
         w.writeframes((clipped * 32767.0).astype(np.int16).tobytes())
 
 
+def leading_glitch_mute_range(
+    samples: "np.ndarray",
+    onset: int,
+    sample_rate: int,
+    max_impulse_ms: float = 30.0,
+    min_gap_ms: float = 15.0,
+    rel_thresh: float = 0.12,
+    abs_floor: float = 0.008,
+) -> tuple[int, int]:
+    """Sample range [start, end) to zero: short impulse + gap before sustained speech at ``onset``."""
+    if onset <= 0:
+        return (0, 0)
+    import numpy as np
+
+    peak = float(np.max(np.abs(samples)))
+    if peak < 1e-8:
+        return (0, 0)
+    thresh = max(abs_floor, peak * rel_thresh)
+    max_impulse = max(1, int(sample_rate * max_impulse_ms / 1000.0))
+    min_gap = max(1, int(sample_rate * min_gap_ms / 1000.0))
+
+    gap_end = onset
+    i = onset - 1
+    while i >= 0 and abs(float(samples[i])) < thresh:
+        i -= 1
+    gap_start = i + 1
+    if gap_end - gap_start < min_gap:
+        return (0, 0)
+
+    imp_end = gap_start
+    j = imp_end - 1
+    while j >= 0 and abs(float(samples[j])) >= thresh:
+        j -= 1
+    imp_start = j + 1
+    imp_len = imp_end - imp_start
+    if imp_len <= 0 or imp_len > max_impulse:
+        return (0, 0)
+
+    k = imp_start - 1
+    while k >= 0 and abs(float(samples[k])) < thresh:
+        k -= 1
+    if k >= 0:
+        return (0, 0)
+
+    return (imp_start, gap_end)
+
+
 def strip_leading_glitches_before_speech(input_wav: Path, sample_rate: int = 24000) -> int:
-    """Zero audio before sustained speech; returns number of samples cleared."""
+    """Mute isolated short leading impulses before sustained speech; returns samples cleared."""
     if not chunk_lead_strip_enabled():
         return 0
     samples = load_mono_float_samples(input_wav).copy()
     onset = speech_onset_sample(samples, sample_rate)
-    if onset <= 0:
+    start, end = leading_glitch_mute_range(samples, onset, sample_rate)
+    if end <= start:
         return 0
-    samples[:onset] = 0.0
+    samples[start:end] = 0.0
     _write_mono_wav(input_wav, samples, sample_rate)
-    return onset
+    return end - start
 
 
 def apply_chunk_lead_fade_in(input_wav: Path, sample_rate: int = 24000, fade_sec: float | None = None) -> None:
-    """Strip leading glitches then fade-in to tame chunk-start clicks before hard concat."""
-    strip_leading_glitches_before_speech(input_wav, sample_rate)
+    """Strip isolated leading clicks then fade-in at speech onset before hard concat."""
+    samples = load_mono_float_samples(input_wav)
+    onset = speech_onset_sample(samples, sample_rate)
+    fade_start = 0
+    if chunk_lead_strip_enabled():
+        start, end = leading_glitch_mute_range(samples, onset, sample_rate)
+        if end > start:
+            cleared = samples.copy()
+            cleared[start:end] = 0.0
+            _write_mono_wav(input_wav, cleared, sample_rate)
+            fade_start = onset
     fade = fade_sec if fade_sec is not None else chunk_lead_fade_sec()
     if fade <= 1e-6:
         return
+    st = fade_start / float(sample_rate)
     faded = input_wav.with_suffix(".leadfade.wav")
-    ffmpeg_run_af(input_wav, faded, f"afade=t=in:st=0:d={fade:.4f}", sample_rate)
+    ffmpeg_run_af(input_wav, faded, f"afade=t=in:st={st:.6f}:d={fade:.4f}", sample_rate)
     faded.replace(input_wav)
 
 
