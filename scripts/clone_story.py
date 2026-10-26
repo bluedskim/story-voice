@@ -69,6 +69,7 @@ def post_process_chunk_wav(
 ) -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
     from audio_post import (
+        apply_chunk_lead_fade_in,
         apply_chunk_tail_pad,
         apply_dialogue_style,
         apply_narration_loudnorm_if_enabled,
@@ -79,8 +80,11 @@ def post_process_chunk_wav(
         styled = chunk_path.with_name(chunk_path.stem + "_styled.wav")
         apply_dialogue_style(chunk_path, styled, sr)
         styled.replace(chunk_path)
-    elif role == "narration":
-        apply_narration_loudnorm_if_enabled(chunk_path, sr)
+    else:
+        # Dialogue style chain already afade=t=in; narration/dialogue need chunk-start de-click.
+        apply_chunk_lead_fade_in(chunk_path, sr)
+        if role == "narration":
+            apply_narration_loudnorm_if_enabled(chunk_path, sr)
     apply_chunk_tail_pad(chunk_path, sr)
 
 

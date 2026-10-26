@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from audio_post import (
     _parse_loudnorm_json,
+    apply_chunk_lead_fade_in,
     apply_chunk_tail_pad,
     apply_dialogue_style,
     apply_final_loudnorm_if_enabled,
@@ -133,6 +134,41 @@ def test_tail_has_limiter_without_fade_out() -> None:
     tail = build_dialogue_tail_filter(3.0)
     assert DIALOGUE_PEAK_LIMITER in tail
     assert "afade=t=out" not in tail
+
+
+def test_chunk_lead_cleanup_removes_pre_speech_click() -> None:
+    """Regression: hard concat exposed TTS leading clicks in inter-chunk silence."""
+    import numpy as np
+    import wave
+
+    sr = 24000
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "clicky.wav"
+        n_lead = int(0.02 * sr)
+        n_click = int(0.06 * sr)
+        n_gap = int(0.04 * sr)
+        n_speech = int(0.25 * sr)
+        total = n_lead + n_click + n_gap + n_speech
+        sig = np.zeros(total, dtype=np.float32)
+        off = n_lead
+        sig[off : off + n_click] = 0.45 * np.hanning(n_click)
+        off += n_click + n_gap
+        t = np.arange(n_speech) / sr
+        sig[off:] = 0.2 * np.sin(2 * np.pi * 440 * t)
+        with wave.open(str(src), "w") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes((sig * 32767).astype(np.int16).tobytes())
+        click_region = slice(n_lead, n_lead + n_click + n_gap)
+        before = float(np.max(np.abs(sig[click_region])))
+        apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
+        samples = load_mono_float_samples(src)
+        after = float(np.max(np.abs(samples[click_region])))
+        speech_peak = float(np.max(np.abs(samples[n_lead + n_click + n_gap :])))
+        assert before > 0.2
+        assert after < before * 0.08
+        assert speech_peak > 0.05
 
 
 def test_chunk_tail_pad_extends_duration() -> None:
@@ -413,6 +449,7 @@ def main() -> int:
     test_bright_preset_override()
     assert DEFAULT_CHUNK_TAIL_PAD_SEC > 0
     test_tail_has_limiter_without_fade_out()
+    test_chunk_lead_cleanup_removes_pre_speech_click()
     test_chunk_tail_pad_extends_duration()
     test_tail_guard_extra_on_tight_tts_end()
     test_tail_guard_skips_extra_when_trailing_silence_present()
