@@ -19,6 +19,9 @@ DEFAULT_DIALOGUE_STYLE = False
 DEFAULT_DIALOGUE_PITCH_ST = 0.0
 DEFAULT_DIALOGUE_GAIN_DB = 0.0
 DEFAULT_DIALOGUE_FADE_SEC = 0.012
+# Attenuate TTS mouth-click / leading glitch at chunk boundaries (narration + dialogue w/o style)
+DEFAULT_CHUNK_LEAD_FADE_SEC = 0.025
+DEFAULT_CHUNK_LEAD_STRIP = True
 # Peak limit after loudness match (~-1 dBFS); chunk tail pad handles concat boundaries
 DIALOGUE_PEAK_LIMITER = "alimiter=limit=0.89:level=false"
 
@@ -71,6 +74,16 @@ def dialogue_gain_db() -> float:
 
 def dialogue_fade_sec() -> float:
     return _float_env("STORY_VOICE_DIALOGUE_FADE_SEC", DEFAULT_DIALOGUE_FADE_SEC)
+
+
+def chunk_lead_fade_sec() -> float:
+    """Fade-in at chunk start before concat (skipped when dialogue style already fades)."""
+    return max(0.0, _float_env("STORY_VOICE_CHUNK_FADE_SEC", DEFAULT_CHUNK_LEAD_FADE_SEC))
+
+
+def chunk_lead_strip_enabled() -> bool:
+    """Drop isolated leading energy before sustained speech (TTS mouth-click in padding)."""
+    return _bool_env("STORY_VOICE_CHUNK_LEAD_STRIP", DEFAULT_CHUNK_LEAD_STRIP)
 
 
 def chunk_tail_pad_sec() -> float:

@@ -12,6 +12,8 @@ from pathlib import Path
 
 from audio_quality_config import (
     DIALOGUE_PEAK_LIMITER,
+    chunk_lead_fade_sec,
+    chunk_lead_strip_enabled,
     chunk_tail_guard_enabled,
     chunk_tail_guard_extra_sec,
     chunk_tail_guard_min_silence_sec,
@@ -220,6 +222,76 @@ def compute_chunk_tail_pad_sec(input_wav: Path, sample_rate: int = 24000) -> flo
     except (OSError, subprocess.CalledProcessError):
         pad += extra
     return pad
+
+
+def speech_onset_sample(
+    samples: "np.ndarray",
+    sample_rate: int,
+    frame_ms: float = 10.0,
+    hold_ms: float = 70.0,
+    rel_thresh: float = 0.12,
+    abs_floor: float = 0.008,
+) -> int:
+    """First sample index of sustained speech (skips isolated leading glitches)."""
+    import numpy as np
+
+    if samples.size == 0:
+        return 0
+    frame = max(1, int(sample_rate * frame_ms / 1000.0))
+    hold_frames = max(1, int(hold_ms / frame_ms))
+    peak = float(np.max(np.abs(samples)))
+    if peak < 1e-8:
+        return 0
+    thresh = max(abs_floor, peak * rel_thresh)
+    n_frames = (samples.size + frame - 1) // frame
+    consec = 0
+    for fi in range(n_frames):
+        start = fi * frame
+        end = min(samples.size, start + frame)
+        rms = float(np.sqrt(np.mean(samples[start:end] ** 2)))
+        if rms >= thresh:
+            consec += 1
+            if consec >= hold_frames:
+                return max(0, (fi - hold_frames + 1) * frame)
+        else:
+            consec = 0
+    return 0
+
+
+def _write_mono_wav(path: Path, samples: "np.ndarray", sample_rate: int) -> None:
+    import numpy as np
+    import wave
+
+    clipped = np.clip(samples, -1.0, 1.0)
+    with wave.open(str(path), "w") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        w.writeframes((clipped * 32767.0).astype(np.int16).tobytes())
+
+
+def strip_leading_glitches_before_speech(input_wav: Path, sample_rate: int = 24000) -> int:
+    """Zero audio before sustained speech; returns number of samples cleared."""
+    if not chunk_lead_strip_enabled():
+        return 0
+    samples = load_mono_float_samples(input_wav).copy()
+    onset = speech_onset_sample(samples, sample_rate)
+    if onset <= 0:
+        return 0
+    samples[:onset] = 0.0
+    _write_mono_wav(input_wav, samples, sample_rate)
+    return onset
+
+
+def apply_chunk_lead_fade_in(input_wav: Path, sample_rate: int = 24000, fade_sec: float | None = None) -> None:
+    """Strip leading glitches then fade-in to tame chunk-start clicks before hard concat."""
+    strip_leading_glitches_before_speech(input_wav, sample_rate)
+    fade = fade_sec if fade_sec is not None else chunk_lead_fade_sec()
+    if fade <= 1e-6:
+        return
+    faded = input_wav.with_suffix(".leadfade.wav")
+    ffmpeg_run_af(input_wav, faded, f"afade=t=in:st=0:d={fade:.4f}", sample_rate)
+    faded.replace(input_wav)
 
 
 def apply_chunk_tail_pad(input_wav: Path, sample_rate: int = 24000) -> None:
