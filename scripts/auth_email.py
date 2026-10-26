@@ -12,6 +12,9 @@ from auth_config import mail_from, mail_mode, resend_api_key
 
 LOG = logging.getLogger("story-voice.auth.email")
 
+# Cloudflare (and some CDNs) block urllib's default client fingerprint (error 1010).
+RESEND_USER_AGENT = "Story-Voice/1.0 (+https://story-voice.baem.app; mail)"
+
 # Test hook: when set to a list, capture outbound messages instead of sending.
 FAKE_OUTBOX: list[dict] | None = None
 
@@ -29,6 +32,20 @@ def effective_mail_mode() -> str:
 
 def is_log_mail_mode() -> bool:
     return effective_mail_mode() == "log"
+
+
+def _resend_email_request(api_key: str, payload: dict) -> urllib.request.Request:
+    return urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": RESEND_USER_AGENT,
+        },
+        method="POST",
+    )
 
 
 def _capture_test_mail(to_email: str, code: str, subject: str) -> bool:
@@ -63,15 +80,7 @@ def send_verification_email(to_email: str, code: str) -> None:
         "subject": subject,
         "text": body,
     }
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    req = _resend_email_request(api_key, payload)
     try:
         with urllib.request.urlopen(req, timeout=30) as res:
             if res.status >= 400:
