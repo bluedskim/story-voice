@@ -59,7 +59,7 @@ def _capture_test_mail(to_email: str, code: str, subject: str) -> bool:
 
 
 def send_verification_email(to_email: str, code: str) -> None:
-    subject = "잠자리 이야기 인증코드"
+    subject = "story-voice 인증코드"
     body = (
         f"인증코드: {code}\n\n"
         "10분 안에 회원가입 화면에 입력해 주세요.\n"
