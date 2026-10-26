@@ -1,4 +1,4 @@
-/** @typedef {{ email: string, nickname: string, isAdmin: boolean, canWrite: boolean }} AuthUser */
+/** @typedef {{ nickname: string, canWrite: boolean }} AuthUser */
 
 let csrfToken = "";
 let authUser = /** @type {AuthUser | null} */ (null);
@@ -137,8 +137,7 @@ export function initAuthUi() {
     logoutBtn.hidden = !loggedIn;
     userLabel.hidden = !loggedIn;
     if (loggedIn) {
-      const tag = authUser.roleLabel === "운영자" ? ` · ${authUser.roleLabel}` : "";
-      userLabel.textContent = `${authUser.nickname}${tag}`;
+      userLabel.textContent = authUser.nickname;
     }
   }
 

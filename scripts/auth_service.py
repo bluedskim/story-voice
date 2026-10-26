@@ -68,14 +68,9 @@ def warn_if_no_admin_emails() -> None:
 
 
 def user_public(user: UserRow) -> dict:
-    is_admin = user_is_admin(user)
+    """Session user for browser clients — no email or operator hints."""
     return {
-        "email": user.email,
         "nickname": user.nickname,
-        "userId": user.id,
-        "role": USER_TYPE_ADMIN if is_admin else USER_TYPE_MEMBER,
-        "roleLabel": "운영자" if is_admin else "회원",
-        "isAdmin": is_admin,
         "canWrite": True,
     }
 

@@ -106,8 +106,11 @@ def test_prepare_and_confirm_integration() -> None:
             wait_server()
             admin = signup_admin(f"http://127.0.0.1:{PORT}", mail_file)
             write_hdrs = auth_headers(admin)
-            me = json.loads(http("GET", "/api/auth/me", headers=write_hdrs).read().decode())
-            uid = me["user"]["userId"]
+            from auth_db import AuthDatabase
+
+            row = AuthDatabase(tmp_path / "auth.db").get_user_by_email("test-admin@example.com")
+            assert row is not None
+            uid = row.id
             ref_wav = users_root / str(uid) / "voice" / "reference.wav"
             ref_txt = users_root / str(uid) / "voice" / "reference.txt"
             ref_wav.parent.mkdir(parents=True, exist_ok=True)

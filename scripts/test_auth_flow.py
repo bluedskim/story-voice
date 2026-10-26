@@ -67,9 +67,10 @@ def test_signup_login_logout() -> None:
                 },
             )
             assert status == 201
-            assert data["user"]["isAdmin"] is False
             assert data["user"]["canWrite"] is True
-            assert data["user"]["isAdmin"] is False
+            assert data["user"]["nickname"] == "엄마"
+            assert "email" not in data["user"]
+            assert "isAdmin" not in data["user"]
 
             guest = HttpSession(f"http://127.0.0.1:{PORT}")
             guest.fetch_config()
@@ -82,7 +83,8 @@ def test_signup_login_logout() -> None:
             assert "sv_session" in guest.cookies
 
             me = json.loads(guest.request("GET", "/api/auth/me").read().decode())
-            assert me["user"]["email"] == "parent@example.com"
+            assert me["user"]["nickname"] == "엄마"
+            assert "email" not in me["user"]
 
             status, _, _ = guest.post_json("/api/auth/logout", {})
             assert status == 200
@@ -143,8 +145,8 @@ def test_gating_and_csrf() -> None:
                 },
             )
             assert status_admin == 201
-            assert data_admin["user"]["isAdmin"] is True
             assert data_admin["user"]["canWrite"] is True
+            assert "isAdmin" not in data_admin["user"]
 
             s.fetch_config()
             s.post_json("/api/users/signup/send-verification", {"loginId": "kid@example.com"})
@@ -167,7 +169,7 @@ def test_gating_and_csrf() -> None:
             )
             assert status == 200
             assert data["user"]["canWrite"] is True
-            assert data["user"]["isAdmin"] is False
+            assert "isAdmin" not in data["user"]
             kid.fetch_config()
             status, data, _ = kid.post_json("/api/generation/all", {})
             assert status == 400
@@ -201,10 +203,13 @@ def test_admin_role_follows_env_list() -> None:
             )
             assert status == 201
             assert data["user"]["canWrite"] is True
-            assert data["user"]["isAdmin"] is False
+            assert "isAdmin" not in data["user"]
         finally:
             proc.terminate()
             proc.wait(timeout=5)
+
+        from auth_db import AuthDatabase
+        from auth_service import user_is_admin
 
         proc2 = start_server(db, mail_file, admin_emails=email)
         try:
@@ -217,7 +222,13 @@ def test_admin_role_follows_env_list() -> None:
             assert status == 200
             assert data["user"]["canWrite"] is True
             me = json.loads(s2.request("GET", "/api/auth/me").read().decode())
-            assert me["user"]["isAdmin"] is True
+            assert "isAdmin" not in me["user"]
+            row = AuthDatabase(db).get_user_by_email(email)
+            assert row is not None
+            import os
+
+            os.environ["STORY_VOICE_ADMIN_EMAILS"] = email
+            assert user_is_admin(row) is True
         finally:
             proc2.terminate()
             proc2.wait(timeout=5)
@@ -233,7 +244,11 @@ def test_admin_role_follows_env_list() -> None:
             )
             assert status == 200
             assert data["user"]["canWrite"] is True
-            assert data["user"]["isAdmin"] is False
+            assert "isAdmin" not in data["user"]
+            row = AuthDatabase(db).get_user_by_email(email)
+            assert row is not None
+            os.environ["STORY_VOICE_ADMIN_EMAILS"] = ""
+            assert user_is_admin(row) is False
             status, data, _ = s3.post_json("/api/generation/all", {})
             assert status == 400
             assert data.get("code") == "need_personal_voice"

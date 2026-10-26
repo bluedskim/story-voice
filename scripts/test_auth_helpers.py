@@ -171,7 +171,7 @@ def signup_member(
     )
     assert status == 201, data
     assert data and data["user"]["canWrite"] is True
-    assert data["user"]["isAdmin"] is False
+    assert "isAdmin" not in data["user"]
     status, data, _ = s.post_json(
         "/api/auth/login",
         {"loginId": email, "password": password},
