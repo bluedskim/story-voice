@@ -234,8 +234,11 @@ def main() -> int:
                 )
                 assert res.status == 200
 
-            me = json.loads(http("GET", "/api/auth/me", headers=write_hdrs).read().decode())
-            admin_uid = me["user"]["userId"]
+            from auth_db import AuthDatabase
+
+            row = AuthDatabase(db).get_user_by_email("test-admin@example.com")
+            assert row is not None
+            admin_uid = row.id
             ref = users_root / str(admin_uid) / "voice" / "reference.wav"
             assert ref.is_file(), "reference.wav missing"
 

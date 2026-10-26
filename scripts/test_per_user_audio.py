@@ -91,10 +91,14 @@ def test_member_voice_and_audio_isolation() -> None:
             assert res.status == 202
             wait_job_done(hdrs_a)
 
-            me_a = json.loads(http("GET", "/api/auth/me", headers=hdrs_a).read().decode())
-            me_b = json.loads(http("GET", "/api/auth/me", headers=hdrs_b).read().decode())
-            uid_a = me_a["user"]["userId"]
-            uid_b = me_b["user"]["userId"]
+            from auth_db import AuthDatabase
+
+            auth_db = AuthDatabase(tmp_path / "auth.db")
+            row_a = auth_db.get_user_by_email("a@example.com")
+            row_b = auth_db.get_user_by_email("b@example.com")
+            assert row_a and row_b
+            uid_a = row_a.id
+            uid_b = row_b.id
             assert (users_root / str(uid_a) / "audio" / "ui-joeun-hyeongje.m4a").is_file()
             assert not (users_root / str(uid_b) / "audio" / "ui-joeun-hyeongje.m4a").is_file()
 

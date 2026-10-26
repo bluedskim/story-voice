@@ -147,7 +147,7 @@ python scripts/serve.py
 | 구분 | 설명 |
 |------|------|
 | **회원** | 로그인 후 기본 낭독 재생, 개인 목소리 저장, (저장 후) 선택 이야기 **내 목소리** 생성·재생성 |
-| **운영자** | `STORY_VOICE_ADMIN_EMAILS`에 있는 이메일 — UI에 «운영자» 표시, 레거시 `data/voice` 참조 자동 이전. 카탈로그·인프라 운영용 (첫 가입자 자동 운영자 아님) |
+| **운영자** | `STORY_VOICE_ADMIN_EMAILS`에 있는 이메일 — 서버만 인식(브라우저에 표시 안 함), 레거시 `data/voice` 참조 자동 이전. 카탈로그·인프라 운영용 (첫 가입자 자동 운영자 아님) |
 
 SQLite: `data/story_voice.db` (git 제외). 비밀번호는 scrypt.
 
@@ -190,6 +190,7 @@ python scripts/test_auth_flow.py
 python scripts/test_generation_flow.py   # STORY_VOICE_GENERATOR=fake
 python scripts/test_voice_upload_flow.py
 python scripts/test_per_user_audio.py
+python scripts/test_user_public.py
 ```
 
 ### 6. Mac mini 배포 (launchd + Tunnel)
