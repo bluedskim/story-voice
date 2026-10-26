@@ -113,8 +113,7 @@ function setAppBusy(busy) {
   }
 }
 
-async function loadConfig() {
-  const data = await refreshAuthFromConfig();
+function applyConfigData(data) {
   recordScriptEl.value = data.recordScript || "";
   hasPersonalVoice = Boolean(data.hasPersonalVoice);
   if (data.voiceReferenceVersion) {
@@ -122,6 +121,11 @@ async function loadConfig() {
   }
   updateWriteGates();
   syncSavedVoicePreview();
+}
+
+async function loadConfig() {
+  const data = await refreshAuthFromConfig({ notify: false });
+  applyConfigData(data);
 }
 
 function updateWriteGates() {
@@ -147,9 +151,8 @@ function updateWriteGates() {
 }
 
 onAuthChange(() => {
-  updateWriteGates();
-  loadCatalog().catch(() => {});
   loadConfig().catch(() => {});
+  loadCatalog({ showLoading: false }).catch(() => {});
 });
 
 function probeDuration(story) {
@@ -172,17 +175,24 @@ function probeDuration(story) {
   );
 }
 
-async function loadCatalog() {
-  listEl.innerHTML = '<p class="loading">이야기를 불러오는 중…</p>';
+let catalogLoadSeq = 0;
+
+async function loadCatalog({ showLoading = true } = {}) {
+  const seq = ++catalogLoadSeq;
+  if (showLoading) {
+    listEl.innerHTML = '<p class="loading">이야기를 불러오는 중…</p>';
+  }
   try {
     const res = await apiFetch("/api/catalog", { cache: "no-store" });
     if (!res.ok) throw new Error(`/api/catalog ${res.status}`);
     const data = await res.json();
+    if (seq !== catalogLoadSeq) return;
     catalog = data.stories || [];
     hasPersonalVoice = Boolean(data.hasPersonalVoice);
     render();
     catalog.forEach(probeDuration);
   } catch (err) {
+    if (seq !== catalogLoadSeq) return;
     listEl.innerHTML = `<p class="error">목록을 불러오지 못했어요.<br><small>${err.message}</small></p>`;
   }
 }
@@ -286,8 +296,13 @@ function render() {
 
     main.append(title, meta, status, actions, toggle, text);
     card.append(motif, main, btn);
+    if (activeId === story.id) {
+      card.classList.add("is-active");
+    }
+
     listEl.appendChild(card);
   }
+  syncNowPlayingUi();
 }
 
 function showNowPlaying(story) {
