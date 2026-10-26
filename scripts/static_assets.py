@@ -44,3 +44,18 @@ def inject_asset_versions(text: str, versions: dict[str, str]) -> str:
         text = text.replace(f'src="{rel}"', f'src="{rel}?v={ver}"')
         text = text.replace(f'"{rel}"', f'"{rel}?v={ver}"')
     return text
+
+
+def inject_app_js_imports(text: str, versions: dict[str, str]) -> str:
+    """Cache-bust the auth.js module import resolved from app.js."""
+    ver = versions.get("auth.js")
+    if not ver:
+        return text
+    busted = f'./auth.js?v={ver}'
+    return text.replace('from "./auth.js"', f'from "{busted}"')
+
+
+def app_js_served_body(versions: dict[str, str] | None = None) -> bytes:
+    versions = versions or web_asset_versions()
+    raw = (WEB_DIR / "app.js").read_text(encoding="utf-8")
+    return inject_app_js_imports(raw, versions).encode("utf-8")

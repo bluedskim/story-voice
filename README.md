@@ -191,6 +191,7 @@ python scripts/test_generation_flow.py   # STORY_VOICE_GENERATOR=fake
 python scripts/test_voice_upload_flow.py
 python scripts/test_per_user_audio.py
 python scripts/test_user_public.py
+python scripts/test_static_assets.py
 ```
 
 ### 6. Mac mini 배포 (launchd + Tunnel)
