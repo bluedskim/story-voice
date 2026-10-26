@@ -116,18 +116,37 @@ python scripts/serve.py
 # 집 Wi‑Fi에서 포트 직접 열기: python scripts/serve.py --host 0.0.0.0
 ```
 
-- **이야기** 탭: 재생, **다시 만들기**, **전체 다시 만들기** (다시 만들기는 **운영자**만)
-- **목소리** 탭: 녹음/업로드, 받아쓰기, 저장 (**운영자**만; 회원은 듣기만)
-- 헤더: **로그인** / **회원가입** (가족용 한국어 UI). 세션은 HttpOnly 쿠키 `sv_session`.
-- 생성은 서버 안 **단일 워커**(MLX 모델 1회 로드, 작업 1개씩, 대기열 최대 2). 새 `.m4a`는 임시 파일에 만든 뒤 `rename`으로 교체해 재생 중 끊김을 줄입니다. 완료 후 카탈로그·오디오 화이트리스트를 **재시작 없이** 갱신합니다.
-- IP당 요청 제한·업로드/대기열 상한 (`CF-Connecting-IP` 지원). 공개 URL은 운영자 선택입니다.
+- **이야기** 탭 (로그인 필요): 카탈로그 재생·다운로드. **기본 낭독**은 가입 직후 공용 음성으로 들을 수 있고, **내 목소리**는 목소리 탭에서 참조를 저장한 뒤 이야기마다 **내 목소리로 만들기** / **다시 만들기** (선택 생성). **전체를 내 목소리로 만들기**도 같은 조건입니다.
+- **목소리** 탭 (로그인 회원): 녹음/업로드 → 받아쓰기 확인 → 저장 (회원 모두 가능).
+- 비로그인: 이야기 글·목록만 (`/api/catalog`는 `hasAudio: false`). 오디오 URL은 **401**.
+- 헤더: **로그인** / **회원가입**. 세션은 HttpOnly 쿠키 `sv_session`.
+- 생성은 **단일 MLX 워커**(작업 1개씩, 대기열 최대 2). 회원별·기본 낭독 작업이 같은 큐를 공유합니다.
+- IP당 요청 제한·업로드 상한 (`CF-Connecting-IP` 지원).
+
+#### 저장소 (로컬, git 제외)
+
+| 경로 | 용도 |
+|------|------|
+| `data/voice/default/` | **기본 낭독** 참조 (`default-narration-source.wav` 또는 `reference.wav`, `reference.txt`) — [`data/voice/default/README.md`](data/voice/default/README.md) |
+| `data/audio/default/<id>.m4a` | 카탈로그 전체용 **공용** 기본 낭독 (회원 가입 시 없으면 서버가 생성 요청) |
+| `data/users/<userId>/voice/` | 회원 **개인** 참조 음성 + `history/` 백업 |
+| `data/users/<userId>/audio/<id>.m4a` | 회원 **개인** 낭독 (있으면 재생 시 기본보다 우선) |
+| `data/voice/`, `data/audio/` | **레거시** 공용 경로 — 삭제하지 않음. 운영자(`STORY_VOICE_ADMIN_EMAILS`) 첫 사용 시 `data/users/<id>/voice/`로 **복사**만 함 |
+
+재생 우선순위: **개인 m4a → 기본 m4a**. 다른 회원의 개인 파일은 제공하지 않습니다.
+
+#### 기본 낭독 목소리 배치 (운영)
+
+1. `data/voice/default/default-narration-source.wav` (약 24초 PCM)를 서버에 복사합니다 (저장소에 wav는 올리지 않음).
+2. `reference.txt`는 없으면 `content/record_script.txt`와 동일한 받아쓰기로 자동 생성됩니다.
+3. 서버 기동·신규 가입 시 빠진 `data/audio/default/*.m4a`를 **한 번씩** 생성합니다.
 
 #### 계정·권한
 
 | 구분 | 설명 |
 |------|------|
-| **회원** | 이야기 재생·다운로드 |
-| **운영자** | 목소리 저장, 이야기 다시 만들기 (`STORY_VOICE_ADMIN_EMAILS`에 있는 이메일만; 로그인·`/api/auth/me`마다 목록과 대조) |
+| **회원** | 로그인 후 기본 낭독 재생, 개인 목소리 저장, (저장 후) 선택 이야기 **내 목소리** 생성·재생성 |
+| **운영자** | `STORY_VOICE_ADMIN_EMAILS`에 있는 이메일 — UI에 «운영자» 표시, 레거시 `data/voice` 참조 자동 이전. 카탈로그·인프라 운영용 (첫 가입자 자동 운영자 아님) |
 
 SQLite: `data/story_voice.db` (git 제외). 비밀번호는 scrypt.
 
@@ -135,7 +154,8 @@ SQLite: `data/story_voice.db` (git 제외). 비밀번호는 scrypt.
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| GET | `/api/config` | `csrfToken`, `authEmailDevMode`, 정적 `assetVersions` |
+| GET | `/api/config` | `csrfToken`, `hasPersonalVoice`, `user`, `assetVersions` |
+| GET | `/api/catalog` | 로그인 시 회원별 `hasAudio` / `audioSource` (`personal` \| `default`); 비로그인은 글만 |
 | GET | `/api/users/nickname-available?nickname=` | 닉네임 중복 (`^[a-zA-Z0-9_가-힣]{2,12}$`) |
 | POST | `/api/users/signup/send-verification` | 이메일 인증코드 (Resend, 60초 재전송 쿨다운) |
 | POST | `/api/users/signup` | 가입 (`loginId`, `nickname`, `password`, `verificationCode`) |
@@ -143,7 +163,7 @@ SQLite: `data/story_voice.db` (git 제외). 비밀번호는 scrypt.
 | POST | `/api/auth/logout` | 로그아웃 |
 | GET | `/api/auth/me` | 현재 사용자 (`user` 또는 `null`) |
 
-쓰기 API(목소리·생성)는 운영자 세션 + `X-CSRF-Token` 필요. 미로그인 401, 회원 403.
+목소리·개인 생성 API는 **로그인** + `X-CSRF-Token`. 개인 생성은 `hasPersonalVoice` 필요 (`need_personal_voice`). 오디오 GET도 로그인 필요.
 
 **환경 변수 (메일·세션)**
 
@@ -168,6 +188,7 @@ Linux/CI에서 HTTP·대기열·ffmpeg·인증 검증:
 python scripts/test_auth_flow.py
 python scripts/test_generation_flow.py   # STORY_VOICE_GENERATOR=fake
 python scripts/test_voice_upload_flow.py
+python scripts/test_per_user_audio.py
 ```
 
 ### 6. Mac mini 배포 (launchd + Tunnel)
@@ -185,7 +206,7 @@ launchctl kickstart -k gui/$(id -u)/app.baem.story-voice
 
 Tunnel은 `http://127.0.0.1:8765` 를 `https://story-voice.baem.app` 등으로 노출합니다. `serve.py`는 기본 `127.0.0.1`에만 바인드합니다.
 
-`serve.py`는 `web/catalog.json`을 갱신한 뒤, 페이지·API·카탈로그에 있는 `data/audio/<id>.m4a`만 제공합니다 (디렉터리 목록 없음, Safari용 HTTP Range).
+`serve.py`는 `web/catalog.json`(공개 메타)을 갱신하고, 재생은 `/api/catalog` + 로그인 세션으로 회원별 오디오를 제공합니다 (Safari용 HTTP Range).
 
 ## 프로젝트 구조
 
@@ -193,8 +214,10 @@ Tunnel은 `http://127.0.0.1:8765` 를 `https://story-voice.baem.app` 등으로 �
 |------|------|
 | `content/stories/` | 동화 원문 + 제목 메타데이터 |
 | `content/recording_guide.md` | 목소리 녹음 가이드 |
-| `data/voice/` | `reference.wav`, `reference.txt` (로컬만) |
-| `data/audio/` | 생성된 `.m4a` (로컬만) |
+| `data/voice/default/` | 기본 낭독 참조 (로컬만) |
+| `data/audio/default/` | 기본 낭독 `.m4a` (로컬만) |
+| `data/users/<id>/voice|audio/` | 회원별 참조·낭독 (로컬만) |
+| `data/voice/`, `data/audio/` | 레거시 공용 (로컬만, 백업 유지) |
 | `scripts/clone_story.py` | 한 편 TTS (~120자 청크, mlx-audio `generate`, ffmpeg concat) |
 | `scripts/generate_all.py` | 모든 편 일괄 생성 |
 | `scripts/story_catalog.py` | `web/catalog.json` 빌드 |

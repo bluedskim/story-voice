@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -18,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from test_auth_helpers import auth_headers, signup_admin, test_server_env
+from user_storage import user_ref_txt, user_ref_wav, user_voice_history_dir
 
 PORT = 18766
 
@@ -89,12 +89,11 @@ def test_duration_text_bounds_unit() -> None:
 
 
 def test_prepare_and_confirm_integration() -> None:
-    from voice_service import REF_TXT, REF_WAV
-
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         mail_file = tmp_path / "mail.jsonl"
         env = test_server_env(tmp_path / "auth.db", mail_file, admin_emails="test-admin@example.com")
+        users_root = Path(env["STORY_VOICE_USERS_DIR"])
         env["STORY_VOICE_VOICE_ASR"] = "fake"
         short_asr = "가" * 40
         env["STORY_VOICE_FAKE_ASR_TEXT"] = short_asr
@@ -107,11 +106,15 @@ def test_prepare_and_confirm_integration() -> None:
             wait_server()
             admin = signup_admin(f"http://127.0.0.1:{PORT}", mail_file)
             write_hdrs = auth_headers(admin)
-            REF_WAV.parent.mkdir(parents=True, exist_ok=True)
-            REF_TXT.write_text("기존 참조 텍스트\n", encoding="utf-8")
-            if REF_WAV.is_file():
-                REF_WAV.unlink()
-            make_upload_wav(REF_WAV, 8.0)
+            me = json.loads(http("GET", "/api/auth/me", headers=write_hdrs).read().decode())
+            uid = me["user"]["userId"]
+            ref_wav = users_root / str(uid) / "voice" / "reference.wav"
+            ref_txt = users_root / str(uid) / "voice" / "reference.txt"
+            ref_wav.parent.mkdir(parents=True, exist_ok=True)
+            ref_txt.write_text("기존 참조 텍스트\n", encoding="utf-8")
+            if ref_wav.is_file():
+                ref_wav.unlink()
+            make_upload_wav(ref_wav, 8.0)
 
             with tempfile.TemporaryDirectory() as upload_tmp:
                 wav = Path(upload_tmp) / "upload.wav"
@@ -129,7 +132,7 @@ def test_prepare_and_confirm_integration() -> None:
                 prep = json.loads(res.read().decode())
                 assert prep.get("pendingToken")
                 assert prep.get("transcript") == short_asr
-                assert REF_TXT.read_text(encoding="utf-8").startswith("기존")
+                assert ref_txt.read_text(encoding="utf-8").startswith("기존")
 
                 confirm_body = json.dumps(
                     {"pendingToken": prep["pendingToken"], "transcript": short_asr},
@@ -142,9 +145,9 @@ def test_prepare_and_confirm_integration() -> None:
                     headers={"Content-Type": "application/json", **write_hdrs},
                 )
                 assert res2.status == 200
-                assert REF_TXT.read_text(encoding="utf-8").strip() == short_asr
-                assert REF_WAV.is_file()
-                history = list((ROOT / "data" / "voice" / "history").glob("*"))
+                assert ref_txt.read_text(encoding="utf-8").strip() == short_asr
+                assert ref_wav.is_file()
+                history = list((users_root / str(uid) / "voice" / "history").glob("*"))
                 assert history, "expected backup dir"
 
             try:
@@ -170,14 +173,14 @@ def test_confirm_rejects_long_text_for_short_audio() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "ref.wav"
         make_upload_wav(wav, 8.0)
-        pending = create_pending(wav, 8.0, "가" * 40, "expected", 0.1)
+        pending = create_pending(1, wav, 8.0, "가" * 40, "expected", 0.1)
         try:
-            confirm_voice_upload(pending.token, "가" * 140)
+            confirm_voice_upload(1, pending.token, "가" * 140)
             raise AssertionError("expected reject")
         except VoiceSaveError as exc:
             assert exc.code == "text_too_long_for_audio"
         finally:
-            delete_pending(pending.token)
+            delete_pending(1, pending.token)
 
 
 def test_prepare_blocked_during_generation() -> None:
@@ -197,10 +200,14 @@ def test_prepare_blocked_during_generation() -> None:
             wait_server()
             admin = signup_admin(f"http://127.0.0.1:{PORT}", mail_file)
             write_hdrs = auth_headers(admin)
+            from test_auth_helpers import save_voice_for_session
+
+            save_voice_for_session(admin, "가" * 40)
             http(
                 "POST",
                 "/api/generation/story/ui-joeun-hyeongje",
-                headers=write_hdrs,
+                data=b'{"asrVerify":false}',
+                headers={"Content-Type": "application/json", **write_hdrs},
             )
             time.sleep(0.5)
             with tempfile.TemporaryDirectory() as upload_tmp:

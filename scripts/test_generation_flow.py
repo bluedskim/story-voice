@@ -123,15 +123,15 @@ def test_generation_asr_enqueue_flags() -> None:
     try:
         os.environ["STORY_VOICE_ASR_VERIFY"] = "1"
         off = GenerationService(backend=FakeGenerationBackend()).enqueue_story(
-            "ui-joeun-hyeongje", asr_verify_request=False
+            "ui-joeun-hyeongje", 1, asr_verify_request=False
         )
         assert off.job.asr_verify is False
         env_default = GenerationService(backend=FakeGenerationBackend()).enqueue_story(
-            "ui-joeun-hyeongje", asr_verify_request=None
+            "ui-joeun-hyeongje", 1, asr_verify_request=None
         )
         assert env_default.job.asr_verify is True
         on = GenerationService(backend=FakeGenerationBackend()).enqueue_story(
-            "ui-joeun-hyeongje", asr_verify_request=True
+            "ui-joeun-hyeongje", 1, asr_verify_request=True
         )
         assert on.job.asr_verify is True
     finally:
@@ -168,6 +168,7 @@ def main() -> int:
         db = tmp_path / "auth.db"
         mail_file = tmp_path / "mail.jsonl"
         env = test_server_env(db, mail_file, admin_emails="test-admin@example.com")
+        users_root = Path(env["STORY_VOICE_USERS_DIR"])
         env["STORY_VOICE_VOICE_ASR"] = "fake"
         short = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()[:60]
         env["STORY_VOICE_FAKE_ASR_TEXT"] = short
@@ -206,12 +207,6 @@ def main() -> int:
                 err = json.loads(exc.read().decode())
                 assert err.get("code") == "invalid_audio"
 
-            try:
-                http("POST", "/api/generation/story/does-not-exist", headers=write_hdrs)
-                raise AssertionError("expected 404")
-            except urllib.error.HTTPError as exc:
-                assert exc.code == 404
-
             with tempfile.TemporaryDirectory() as wav_tmp:
                 wav = Path(wav_tmp) / "voice.wav"
                 make_upload_wav(wav, 8.0)
@@ -239,8 +234,21 @@ def main() -> int:
                 )
                 assert res.status == 200
 
-            ref = ROOT / "data" / "voice" / "reference.wav"
+            me = json.loads(http("GET", "/api/auth/me", headers=write_hdrs).read().decode())
+            admin_uid = me["user"]["userId"]
+            ref = users_root / str(admin_uid) / "voice" / "reference.wav"
             assert ref.is_file(), "reference.wav missing"
+
+            try:
+                http(
+                    "POST",
+                    "/api/generation/story/does-not-exist",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json", **write_hdrs},
+                )
+                raise AssertionError("expected 404")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 404
 
             try:
                 http(
@@ -286,18 +294,18 @@ def main() -> int:
             else:
                 raise AssertionError("generation timed out")
 
-            out = ROOT / "data" / "audio" / "ui-joeun-hyeongje.m4a"
+            out = users_root / str(admin_uid) / "audio" / "ui-joeun-hyeongje.m4a"
             assert out.is_file(), "output m4a missing"
 
-            cat = json.loads(http("GET", "/catalog.json").read().decode())
+            cat = json.loads(http("GET", "/api/catalog", headers=write_hdrs).read().decode())
             assert any(s["id"] == "ui-joeun-hyeongje" and s["hasAudio"] for s in cat["stories"])
 
-            res = http("GET", "/audio/ui-joeun-hyeongje.m4a", headers={"Range": "bytes=0-99"})
+            res = http("GET", "/audio/ui-joeun-hyeongje.m4a", headers={"Range": "bytes=0-99", **write_hdrs})
             assert res.status == 206, res.status
             assert res.headers.get("Content-Type") == "audio/mp4"
             assert res.headers.get("Content-Disposition") is None
 
-            res = http("GET", "/audio/ui-joeun-hyeongje.m4a?download=1")
+            res = http("GET", "/audio/ui-joeun-hyeongje.m4a?download=1", headers=write_hdrs)
             assert res.status == 200
             cd = res.headers.get("Content-Disposition", "")
             assert "attachment" in cd
@@ -307,6 +315,15 @@ def main() -> int:
 
             try:
                 http("GET", "/audio/does-not-exist.m4a?download=1")
+                raise AssertionError("expected 401 without login")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 401
+            try:
+                http(
+                    "GET",
+                    "/audio/does-not-exist.m4a?download=1",
+                    headers=write_hdrs,
+                )
                 raise AssertionError("expected 404 for unknown download")
             except urllib.error.HTTPError as exc:
                 assert exc.code == 404

@@ -68,7 +68,8 @@ def test_signup_login_logout() -> None:
             )
             assert status == 201
             assert data["user"]["isAdmin"] is False
-            assert data["user"]["canWrite"] is False
+            assert data["user"]["canWrite"] is True
+            assert data["user"]["isAdmin"] is False
 
             guest = HttpSession(f"http://127.0.0.1:{PORT}")
             guest.fetch_config()
@@ -165,11 +166,12 @@ def test_gating_and_csrf() -> None:
                 {"loginId": "kid@example.com", "password": "kidpass12"},
             )
             assert status == 200
-            assert data["user"]["canWrite"] is False
+            assert data["user"]["canWrite"] is True
+            assert data["user"]["isAdmin"] is False
             kid.fetch_config()
             status, data, _ = kid.post_json("/api/generation/all", {})
-            assert status == 403
-            assert data.get("code") == "forbidden"
+            assert status == 400
+            assert data.get("code") == "need_personal_voice"
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -198,7 +200,8 @@ def test_admin_role_follows_env_list() -> None:
                 },
             )
             assert status == 201
-            assert data["user"]["canWrite"] is False
+            assert data["user"]["canWrite"] is True
+            assert data["user"]["isAdmin"] is False
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -229,10 +232,11 @@ def test_admin_role_follows_env_list() -> None:
                 {"loginId": email, "password": password},
             )
             assert status == 200
-            assert data["user"]["canWrite"] is False
+            assert data["user"]["canWrite"] is True
+            assert data["user"]["isAdmin"] is False
             status, data, _ = s3.post_json("/api/generation/all", {})
-            assert status == 403
-            assert data.get("code") == "forbidden"
+            assert status == 400
+            assert data.get("code") == "need_personal_voice"
         finally:
             proc3.terminate()
             proc3.wait(timeout=5)

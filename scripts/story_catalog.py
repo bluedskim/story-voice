@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STORIES_DIR = ROOT / "content" / "stories"
-AUDIO_DIR = ROOT / "data" / "audio"
+AUDIO_DIR = ROOT / "data" / "audio"  # legacy global audio (not served to members)
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
@@ -66,11 +66,28 @@ def list_stories(stories_dir: Path | None = None) -> list[Story]:
     return sorted(stories, key=lambda s: (s.order, s.title))
 
 
-def build_manifest(stories_dir: Path | None = None, audio_dir: Path | None = None) -> dict:
-    audio_base = audio_dir or AUDIO_DIR
+def build_manifest(
+    stories_dir: Path | None = None,
+    audio_dir: Path | None = None,
+    user_id: int | None = None,
+) -> dict:
+    from default_narration import story_audio_meta
+    from user_storage import has_user_reference
+
     stories = list_stories(stories_dir)
     items = []
     for story in stories:
+        if user_id is not None:
+            entry = {
+                "id": story.id,
+                "title": story.title,
+                "order": story.order,
+                "text": story.body,
+            }
+            entry.update(story_audio_meta(user_id, story.id))
+            items.append(entry)
+            continue
+        audio_base = audio_dir or AUDIO_DIR
         audio_file = audio_base / f"{story.id}.m4a"
         entry = {
             "id": story.id,
@@ -82,15 +99,39 @@ def build_manifest(stories_dir: Path | None = None, audio_dir: Path | None = Non
         if audio_file.is_file():
             entry["audioUrl"] = f"/audio/{story.id}.m4a"
         items.append(entry)
-    return {"stories": items}
+    manifest = {"stories": items}
+    if user_id is not None:
+        manifest["hasPersonalVoice"] = has_user_reference(user_id)
+    return manifest
+
+
+def build_public_catalog(stories_dir: Path | None = None) -> dict:
+    """Story list for anonymous visitors — no per-user audio."""
+    stories = list_stories(stories_dir)
+    items = []
+    for story in stories:
+        items.append(
+            {
+                "id": story.id,
+                "title": story.title,
+                "order": story.order,
+                "text": story.body,
+                "hasAudio": False,
+            }
+        )
+    return {"stories": items, "requiresLoginForAudio": True}
 
 
 def write_manifest(
     out_path: Path,
     stories_dir: Path | None = None,
     audio_dir: Path | None = None,
+    user_id: int | None = None,
 ) -> dict:
-    manifest = build_manifest(stories_dir, audio_dir)
+    if user_id is not None:
+        manifest = build_manifest(stories_dir, user_id=user_id)
+    else:
+        manifest = build_public_catalog(stories_dir)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return manifest
