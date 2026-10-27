@@ -54,10 +54,6 @@
 
       <section id="panel-stories" class="panel">
         <div class="panel-actions">
-          <label class="regen-option" id="regen-asr-wrap" hidden>
-            <input type="checkbox" id="regen-asr-verify" />
-            발음 검증 (ASR)
-          </label>
           <button type="button" id="regen-all" class="btn btn-secondary">
             <span class="btn-icon" aria-hidden="true">✨</span>
             전체를 내 목소리로 만들기
@@ -77,7 +73,7 @@
           </li>
           <li class="voice-step" data-step="2">
             <span class="voice-step-num">2</span>
-            <span>받아쓰기</span>
+            <span>검증</span>
           </li>
           <li class="voice-step" data-step="3">
             <span class="voice-step-num">3</span>
@@ -87,7 +83,7 @@
 
         <div class="card voice-card">
           <p class="voice-hint">
-            대본을 읽어 녹음하거나 파일을 올려 주세요. 받아쓰기가 녹음과 같아야 이야기 길이가 정상이에요.
+            대본을 읽어 녹음하거나 파일을 올려 주세요. 녹음이 대본과 맞아야 저장할 수 있어요.
           </p>
           <label class="field-label" for="record-script">녹음 대본</label>
           <textarea id="record-script" class="transcript transcript-readonly" rows="5" readonly spellcheck="false"></textarea>
@@ -113,7 +109,7 @@
             </div>
           </div>
 
-          <button type="button" id="prepare-voice" class="btn btn-secondary btn-wide" disabled>받아쓰기 확인</button>
+          <button type="button" id="prepare-voice" class="btn btn-secondary btn-wide" disabled>발음 검증</button>
         </div>
 
         <div id="voice-review" class="card voice-review" hidden>
@@ -122,12 +118,29 @@
             <span class="match-ring" id="match-ring"></span>
             <span class="match-text" id="match-text"></span>
           </div>
-          <label class="field-label" for="transcript">받아쓰기 (수정 가능)</label>
-          <textarea id="transcript" class="transcript" rows="6" spellcheck="false"></textarea>
+          <label class="field-label" for="transcript">인식 결과 (수정할 수 없음)</label>
+          <textarea
+            id="transcript"
+            class="transcript transcript-readonly"
+            rows="6"
+            readonly
+            spellcheck="false"
+            aria-readonly="true"
+          ></textarea>
+          <p id="voice-rerecord-hint" class="voice-rerecord-hint" hidden>
+            대본 일치가 낮아요. 글을 고치지 말고, 같은 대본을 다시 읽어 녹음해 주세요.
+          </p>
           <button type="button" id="save-voice" class="btn btn-primary btn-wide">이 목소리로 저장</button>
         </div>
 
         <p id="voice-msg" class="voice-msg" role="status"></p>
+
+        <div class="panel-actions voice-gen-options">
+          <label class="regen-option" id="regen-asr-wrap" hidden>
+            <input type="checkbox" id="regen-asr-verify" />
+            발음 검증 (ASR)
+          </label>
+        </div>
       </section>
 
       <footer class="footer">

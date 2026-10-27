@@ -48,7 +48,8 @@ def test_member_voice_and_audio_isolation() -> None:
         env = test_server_env(tmp_path / "auth.db", mail_file, admin_emails="")
         users_root = Path(env["STORY_VOICE_USERS_DIR"])
         env["STORY_VOICE_VOICE_ASR"] = "fake"
-        env["STORY_VOICE_FAKE_ASR_TEXT"] = "가" * 40
+        record_script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
+        env["STORY_VOICE_FAKE_ASR_TEXT"] = record_script
         proc = subprocess.Popen(
             [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
             cwd=ROOT,
@@ -80,7 +81,7 @@ def test_member_voice_and_audio_isolation() -> None:
             hdrs_a = auth_headers(member_a)
             hdrs_b = auth_headers(member_b)
 
-            save_voice_for_session(member_a, "가" * 40)
+            save_voice_for_session(member_a, record_script)
 
             res = http(
                 "POST",

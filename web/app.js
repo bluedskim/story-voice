@@ -34,7 +34,11 @@ const voiceMetaEl = document.getElementById("voice-meta");
 const voiceMatchEl = document.getElementById("voice-match");
 const matchRingEl = document.getElementById("match-ring");
 const matchTextEl = document.getElementById("match-text");
+const voiceRerecordHintEl = document.getElementById("voice-rerecord-hint");
 const voiceSteps = document.querySelectorAll(".voice-step");
+
+const VOICE_MIN_MATCH_PERCENT = 70;
+let voiceCanSave = false;
 
 const nowPlayingEl = document.getElementById("now-playing");
 const npTitleEl = document.getElementById("np-title");
@@ -570,6 +574,7 @@ function syncSavedVoicePreview() {
 
 function resetVoiceReview() {
   pendingToken = null;
+  voiceCanSave = false;
   voiceReviewEl.hidden = true;
   transcriptEl.value = "";
   voiceMetaEl.textContent = "";
@@ -577,6 +582,8 @@ function resetVoiceReview() {
   matchRingEl.style.setProperty("--pct", "0%");
   matchRingEl.dataset.label = "";
   voiceMatchEl.classList.remove("is-warn");
+  voiceRerecordHintEl.hidden = true;
+  saveVoiceBtn.disabled = false;
   setVoiceStep(1);
 }
 
@@ -584,7 +591,7 @@ function onAudioReady() {
   if (!generationBusy) prepareVoiceBtn.disabled = false;
   resetVoiceReview();
   previewPlayerUi.hidden = false;
-  voiceMsgEl.textContent = "미리 듣고 ‘받아쓰기 확인’을 눌러 주세요.";
+  voiceMsgEl.textContent = "미리 듣고 ‘발음 검증’을 눌러 주세요.";
   voiceMsgEl.className = "voice-msg";
   setVoiceStep(1);
 }
@@ -627,7 +634,7 @@ function onFileSelected(file) {
   pendingBlob = file;
   setPreviewToPending(file);
   onAudioReady();
-  voiceMsgEl.textContent = `${file.name} — 미리 듣고 ‘받아쓰기 확인’을 눌러 주세요.`;
+  voiceMsgEl.textContent = `${file.name} — 미리 듣고 ‘발음 검증’을 눌러 주세요.`;
 }
 
 previewPlayBtn.addEventListener("click", () => {
@@ -665,21 +672,32 @@ async function prepareVoice() {
   transcriptEl.value = data.transcript || "";
   voiceMetaEl.textContent = `녹음 ${data.durationSec}초 · 이 길이에는 보통 ${data.limits?.maxCharsForDuration ?? "?"}자 이하`;
   const pct = data.scriptMatchPercent ?? 0;
+  voiceCanSave = pct >= VOICE_MIN_MATCH_PERCENT;
   matchRingEl.style.setProperty("--pct", `${pct}%`);
   matchRingEl.dataset.label = `${pct}`;
-  matchTextEl.textContent = `대본 일치 약 ${pct}% (자동 받아쓰기 vs 녹음 대본)`;
-  voiceMatchEl.classList.toggle("is-warn", pct < 70);
+  matchTextEl.textContent = `대본 일치 약 ${pct}% (녹음 대본 vs 자동 인식)`;
+  const lowMatch = pct < VOICE_MIN_MATCH_PERCENT;
+  voiceMatchEl.classList.toggle("is-warn", lowMatch);
+  voiceRerecordHintEl.hidden = !lowMatch;
+  saveVoiceBtn.disabled = lowMatch;
   voiceReviewEl.hidden = false;
-  voiceMsgEl.textContent = "받아쓰기를 확인하고 필요하면 고친 뒤 저장해 주세요.";
-  voiceMsgEl.className = "voice-msg";
+  voiceMsgEl.textContent = lowMatch
+    ? "대본과 녹음이 맞지 않아요. 같은 대본으로 다시 녹음해 주세요."
+    : "대본 일치가 충분해요. ‘이 목소리로 저장’을 눌러 주세요.";
+  voiceMsgEl.className = lowMatch ? "voice-msg is-warn" : "voice-msg";
   if (!generationBusy) prepareVoiceBtn.disabled = false;
   setVoiceStep(2);
 }
 
 async function saveVoice() {
   if (!pendingToken) {
-    voiceMsgEl.textContent = "먼저 ‘받아쓰기 확인’을 해 주세요.";
+    voiceMsgEl.textContent = "먼저 ‘발음 검증’을 해 주세요.";
     voiceMsgEl.className = "voice-msg is-error";
+    return;
+  }
+  if (!voiceCanSave) {
+    voiceMsgEl.textContent = "대본과 녹음이 맞지 않아요. 같은 대본으로 다시 녹음해 주세요.";
+    voiceMsgEl.className = "voice-msg is-warn";
     return;
   }
   saveVoiceBtn.disabled = true;
@@ -693,15 +711,11 @@ async function saveVoice() {
   if (!res.ok) {
     voiceMsgEl.textContent = data.error || "저장하지 못했어요.";
     voiceMsgEl.className = "voice-msg is-error";
-    saveVoiceBtn.disabled = false;
+    saveVoiceBtn.disabled = !voiceCanSave;
     return;
   }
-  let msg = `저장했어요 (${data.durationSec}초). 이야기를 다시 만들 수 있어요.`;
+  const msg = `저장했어요 (${data.durationSec}초). 이야기를 다시 만들 수 있어요.`;
   voiceMsgEl.className = "voice-msg";
-  if (data.editWarning) {
-    msg += ` ${data.editWarning}`;
-    voiceMsgEl.className = "voice-msg is-warn";
-  }
   voiceMsgEl.textContent = msg;
   hasPersonalVoice = true;
   pendingBlob = null;
