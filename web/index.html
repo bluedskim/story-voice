@@ -121,9 +121,27 @@
             <div class="preview-player">
               <audio id="preview" class="preview-audio" playsinline></audio>
               <p class="preview-label">미리 듣기</p>
+              <p id="preview-saved-hint" class="preview-saved-hint" hidden>
+                저장된 내 목소리입니다. 재생해서 들을 수 있어요.
+              </p>
               <div class="mini-player" id="preview-player-ui" hidden>
                 <button type="button" class="mini-play" id="preview-play" aria-label="미리 듣기 재생">▶</button>
-                <span class="mini-time" id="preview-time">0:00</span>
+                <div class="mini-player-body">
+                  <div class="mini-times">
+                    <span id="preview-current">0:00</span>
+                    <span class="mini-sep" aria-hidden="true">/</span>
+                    <span id="preview-duration">0:00</span>
+                  </div>
+                  <input
+                    type="range"
+                    id="preview-seek"
+                    class="preview-seek"
+                    min="0"
+                    max="1000"
+                    value="0"
+                    aria-label="미리 듣기 재생 위치"
+                  />
+                </div>
               </div>
             </div>
           </section>
@@ -139,7 +157,16 @@
               검증
             </h2>
             <p class="voice-section-lead">미리 듣기로 확인한 뒤 발음 검증을 실행해 주세요.</p>
-            <button type="button" id="prepare-voice" class="btn btn-secondary btn-wide" disabled>발음 검증</button>
+            <button
+              type="button"
+              id="prepare-voice"
+              class="btn btn-secondary btn-wide"
+              disabled
+              aria-busy="false"
+            >
+              <span class="prepare-voice-spinner" aria-hidden="true"></span>
+              <span class="prepare-voice-label">발음 검증</span>
+            </button>
             <div id="voice-review" class="voice-review" hidden>
               <p id="voice-meta" class="voice-meta"></p>
               <div id="voice-match" class="voice-match" aria-live="polite">
