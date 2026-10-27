@@ -743,6 +743,11 @@ body {
   color: var(--danger);
 }
 
+/* `.voice-recording-status { display: flex }` overrides UA `[hidden]` on some browsers */
+.voice-recording-status[hidden] {
+  display: none !important;
+}
+
 .voice-recording-dot {
   width: 0.55rem;
   height: 0.55rem;
