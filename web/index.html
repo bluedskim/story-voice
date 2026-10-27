@@ -54,10 +54,6 @@
 
       <section id="panel-stories" class="panel">
         <div class="panel-actions">
-          <label class="regen-option" id="regen-asr-wrap" hidden>
-            <input type="checkbox" id="regen-asr-verify" />
-            발음 검증 (ASR)
-          </label>
           <button type="button" id="regen-all" class="btn btn-secondary">
             <span class="btn-icon" aria-hidden="true">✨</span>
             전체를 내 목소리로 만들기
@@ -128,6 +124,13 @@
         </div>
 
         <p id="voice-msg" class="voice-msg" role="status"></p>
+
+        <div class="panel-actions voice-gen-options">
+          <label class="regen-option" id="regen-asr-wrap" hidden>
+            <input type="checkbox" id="regen-asr-verify" />
+            발음 검증 (ASR)
+          </label>
+        </div>
       </section>
 
       <footer class="footer">
