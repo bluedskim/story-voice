@@ -25,11 +25,15 @@ const fileInput = document.getElementById("file-input");
 const previewEl = document.getElementById("preview");
 const previewPlayerUi = document.getElementById("preview-player-ui");
 const previewPlayBtn = document.getElementById("preview-play");
-const previewTimeEl = document.getElementById("preview-time");
+const previewCurrentEl = document.getElementById("preview-current");
+const previewDurationEl = document.getElementById("preview-duration");
+const previewSeekEl = document.getElementById("preview-seek");
+const previewSavedHintEl = document.getElementById("preview-saved-hint");
 const prepareVoiceBtn = document.getElementById("prepare-voice");
+const prepareVoiceLabelEl = prepareVoiceBtn?.querySelector(".prepare-voice-label");
+const voiceSectionVerifyEl = document.getElementById("voice-section-verify");
 const saveVoiceBtn = document.getElementById("save-voice");
 const voiceMsgEl = document.getElementById("voice-msg");
-const voiceSectionVerifyEl = document.getElementById("voice-section-verify");
 const voiceSectionSaveEl = document.getElementById("voice-section-save");
 const voiceRecordingStatusEl = document.getElementById("voice-recording-status");
 const recordBtnLabelEl = recordBtn.querySelector(".record-btn-label");
@@ -67,6 +71,8 @@ let pollTimer = null;
 let durationCache = {};
 let generationBusy = false;
 let seekDragging = false;
+let previewSeekDragging = false;
+let prepareVoiceBusy = false;
 
 let mediaRecorder = null;
 let recordChunks = [];
@@ -164,7 +170,7 @@ function updateWriteGates() {
     recordBtn.disabled = true;
     prepareVoiceBtn.disabled = true;
     stopBtn.disabled = true;
-  } else if (!generationBusy && (!mediaRecorder || mediaRecorder.state === "inactive")) {
+  } else if (!generationBusy && !prepareVoiceBusy && (!mediaRecorder || mediaRecorder.state === "inactive")) {
     recordBtn.disabled = false;
     if (pendingBlob) prepareVoiceBtn.disabled = false;
   }
@@ -213,6 +219,7 @@ async function loadCatalog({ showLoading = true } = {}) {
     catalog = data.stories || [];
     hasPersonalVoice = Boolean(data.hasPersonalVoice);
     render();
+    syncSavedVoicePreview();
     catalog.forEach(probeDuration);
   } catch (err) {
     if (seq !== catalogLoadSeq) return;
@@ -561,13 +568,41 @@ function savedVoicePreviewUrl() {
   return `/api/voice/reference.wav?v=${bust}`;
 }
 
+function syncPreviewSavedHint() {
+  const showSaved =
+    Boolean(previewEl.src) &&
+    !pendingBlob &&
+    hasPersonalVoice &&
+    canWrite() &&
+    !previewObjectUrl;
+  if (previewSavedHintEl) previewSavedHintEl.hidden = !showSaved;
+}
+
+function resetPreviewSeekUi() {
+  if (previewCurrentEl) previewCurrentEl.textContent = "0:00";
+  if (previewDurationEl) previewDurationEl.textContent = "0:00";
+  if (previewSeekEl) previewSeekEl.value = "0";
+}
+
+function syncPreviewUi() {
+  if (!previewEl.src) return;
+  previewPlayBtn.textContent = playIcon(!previewEl.paused);
+  const dur = Number.isFinite(previewEl.duration) ? previewEl.duration : 0;
+  if (previewCurrentEl) previewCurrentEl.textContent = formatTime(previewEl.currentTime);
+  if (previewDurationEl) previewDurationEl.textContent = formatTime(dur);
+  if (!previewSeekDragging && previewSeekEl && dur > 0) {
+    previewSeekEl.value = String(Math.round((previewEl.currentTime / dur) * 1000));
+  }
+}
+
 function setPreviewToPending(blob) {
   revokePreviewObjectUrl();
   previewObjectUrl = URL.createObjectURL(blob);
   previewEl.src = previewObjectUrl;
   previewPlayerUi.hidden = false;
-  previewPlayBtn.textContent = playIcon(false);
-  previewTimeEl.textContent = "0:00";
+  resetPreviewSeekUi();
+  syncPreviewSavedHint();
+  previewEl.load();
 }
 
 function setPreviewToSavedReference(bust) {
@@ -575,20 +610,40 @@ function setPreviewToSavedReference(bust) {
   if (bust) voiceReferenceBust = bust;
   previewEl.src = savedVoicePreviewUrl();
   previewPlayerUi.hidden = false;
-  previewPlayBtn.textContent = playIcon(false);
-  previewTimeEl.textContent = "0:00";
+  resetPreviewSeekUi();
+  syncPreviewSavedHint();
   previewEl.load();
 }
 
 function syncSavedVoicePreview() {
-  if (pendingBlob) return;
+  if (pendingBlob) {
+    syncPreviewSavedHint();
+    return;
+  }
   if (!hasPersonalVoice || !canWrite()) {
     revokePreviewObjectUrl();
     previewEl.removeAttribute("src");
     previewPlayerUi.hidden = true;
+    syncPreviewSavedHint();
     return;
   }
   setPreviewToSavedReference(voiceReferenceBust);
+}
+
+function setPrepareVoiceBusy(busy) {
+  prepareVoiceBusy = busy;
+  prepareVoiceBtn.classList.toggle("is-busy", busy);
+  prepareVoiceBtn.setAttribute("aria-busy", busy ? "true" : "false");
+  voiceSectionVerifyEl?.classList.toggle("is-preparing", busy);
+  if (prepareVoiceLabelEl) {
+    prepareVoiceLabelEl.textContent = busy ? "발음 검증 중…" : "발음 검증";
+  }
+  if (busy) {
+    recordBtn.disabled = true;
+    stopBtn.disabled = true;
+  } else if (!generationBusy) {
+    updateWriteGates();
+  }
 }
 
 function resetVoiceReview() {
@@ -665,11 +720,29 @@ previewPlayBtn.addEventListener("click", () => {
   if (!previewEl.src) return;
   if (previewEl.paused) previewEl.play();
   else previewEl.pause();
-  previewPlayBtn.textContent = playIcon(!previewEl.paused);
+  syncPreviewUi();
 });
 
-previewEl.addEventListener("timeupdate", () => {
-  previewTimeEl.textContent = formatTime(previewEl.currentTime);
+previewEl.addEventListener("timeupdate", syncPreviewUi);
+previewEl.addEventListener("loadedmetadata", syncPreviewUi);
+previewEl.addEventListener("ended", syncPreviewUi);
+previewEl.addEventListener("pause", syncPreviewUi);
+
+previewSeekEl?.addEventListener("input", () => {
+  previewSeekDragging = true;
+  const dur = previewEl.duration;
+  if (!Number.isFinite(dur)) return;
+  const t = (Number(previewSeekEl.value) / 1000) * dur;
+  if (previewCurrentEl) previewCurrentEl.textContent = formatTime(t);
+});
+
+previewSeekEl?.addEventListener("change", () => {
+  const dur = previewEl.duration;
+  if (Number.isFinite(dur)) {
+    previewEl.currentTime = (Number(previewSeekEl.value) / 1000) * dur;
+  }
+  previewSeekDragging = false;
+  syncPreviewUi();
 });
 
 function voiceFormData() {
@@ -680,38 +753,42 @@ function voiceFormData() {
 }
 
 async function prepareVoice() {
-  if (!pendingBlob || generationBusy) return;
+  if (!pendingBlob || generationBusy || prepareVoiceBusy) return;
+  setPrepareVoiceBusy(true);
   prepareVoiceBtn.disabled = true;
-  voiceMsgEl.textContent = "받아쓰는 중… (잠시만요)";
-  voiceMsgEl.className = "voice-msg";
-  const res = await apiFetch("/api/voice/prepare", { method: "POST", body: voiceFormData() });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    voiceMsgEl.textContent = data.error || "받아쓰기에 실패했어요.";
-    voiceMsgEl.className = "voice-msg is-error";
-    if (!generationBusy) prepareVoiceBtn.disabled = false;
-    return;
+  voiceMsgEl.textContent = "발음 검증 중… 받아쓰고 대본과 비교하는 중입니다. 잠시만 기다려 주세요.";
+  voiceMsgEl.className = "voice-msg is-busy";
+  try {
+    const res = await apiFetch("/api/voice/prepare", { method: "POST", body: voiceFormData() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      voiceMsgEl.textContent = data.error || "받아쓰기에 실패했어요.";
+      voiceMsgEl.className = "voice-msg is-error";
+      return;
+    }
+    pendingToken = data.pendingToken;
+    transcriptEl.value = data.transcript || "";
+    voiceMetaEl.textContent = `녹음 ${data.durationSec}초 · 이 길이에는 보통 ${data.limits?.maxCharsForDuration ?? "?"}자 이하`;
+    const pct = data.scriptMatchPercent ?? 0;
+    voiceCanSave = pct >= VOICE_MIN_MATCH_PERCENT;
+    matchRingEl.style.setProperty("--pct", `${pct}%`);
+    matchRingEl.dataset.label = `${pct}`;
+    matchTextEl.textContent = `대본 일치 약 ${pct}% (녹음 대본 vs 자동 인식)`;
+    const lowMatch = pct < VOICE_MIN_MATCH_PERCENT;
+    voiceMatchEl.classList.toggle("is-warn", lowMatch);
+    voiceRerecordHintEl.hidden = !lowMatch;
+    saveVoiceBtn.disabled = lowMatch;
+    voiceReviewEl.hidden = false;
+    syncVoiceSections();
+    voiceMsgEl.textContent = lowMatch
+      ? "대본과 녹음이 맞지 않아요. 같은 대본으로 다시 녹음해 주세요."
+      : "대본 일치가 충분해요. ‘이 목소리로 저장’을 눌러 주세요.";
+    voiceMsgEl.className = lowMatch ? "voice-msg is-warn" : "voice-msg";
+    setVoiceStep(2);
+  } finally {
+    setPrepareVoiceBusy(false);
+    if (!generationBusy && pendingBlob) prepareVoiceBtn.disabled = false;
   }
-  pendingToken = data.pendingToken;
-  transcriptEl.value = data.transcript || "";
-  voiceMetaEl.textContent = `녹음 ${data.durationSec}초 · 이 길이에는 보통 ${data.limits?.maxCharsForDuration ?? "?"}자 이하`;
-  const pct = data.scriptMatchPercent ?? 0;
-  voiceCanSave = pct >= VOICE_MIN_MATCH_PERCENT;
-  matchRingEl.style.setProperty("--pct", `${pct}%`);
-  matchRingEl.dataset.label = `${pct}`;
-  matchTextEl.textContent = `대본 일치 약 ${pct}% (녹음 대본 vs 자동 인식)`;
-  const lowMatch = pct < VOICE_MIN_MATCH_PERCENT;
-  voiceMatchEl.classList.toggle("is-warn", lowMatch);
-  voiceRerecordHintEl.hidden = !lowMatch;
-  saveVoiceBtn.disabled = lowMatch;
-  voiceReviewEl.hidden = false;
-  syncVoiceSections();
-  voiceMsgEl.textContent = lowMatch
-    ? "대본과 녹음이 맞지 않아요. 같은 대본으로 다시 녹음해 주세요."
-    : "대본 일치가 충분해요. ‘이 목소리로 저장’을 눌러 주세요.";
-  voiceMsgEl.className = lowMatch ? "voice-msg is-warn" : "voice-msg";
-  if (!generationBusy) prepareVoiceBtn.disabled = false;
-  setVoiceStep(2);
 }
 
 async function saveVoice() {
@@ -751,6 +828,7 @@ async function saveVoice() {
   syncVoiceSections();
   const bust = data.referenceVersion || Date.now();
   setPreviewToSavedReference(bust);
+  syncPreviewSavedHint();
   setVoiceStep(3);
 }
 

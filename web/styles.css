@@ -743,6 +743,11 @@ body {
   color: var(--danger);
 }
 
+/* `.voice-recording-status { display: flex }` overrides UA `[hidden]` on some browsers */
+.voice-recording-status[hidden] {
+  display: none !important;
+}
+
 .voice-recording-dot {
   width: 0.55rem;
   height: 0.55rem;
@@ -806,6 +811,17 @@ body {
   color: var(--muted);
 }
 
+.preview-saved-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.82rem;
+  color: var(--text-soft);
+  line-height: 1.45;
+}
+
+.preview-saved-hint[hidden] {
+  display: none !important;
+}
+
 .mini-player {
   display: flex;
   align-items: center;
@@ -815,14 +831,74 @@ body {
   border-radius: var(--radius-sm);
 }
 
+.mini-player-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.mini-times {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+}
+
+.mini-sep {
+  margin: 0 0.12rem;
+}
+
+.preview-seek {
+  width: 100%;
+  margin: 0;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .mini-play {
   width: 2.25rem;
   height: 2.25rem;
+  flex-shrink: 0;
   border: none;
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent);
   cursor: pointer;
+}
+
+#prepare-voice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+#prepare-voice.is-busy {
+  pointer-events: none;
+  opacity: 0.88;
+}
+
+.prepare-voice-spinner {
+  display: none;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: prepare-voice-spin 0.75s linear infinite;
+}
+
+#prepare-voice.is-busy .prepare-voice-spinner {
+  display: inline-block;
+}
+
+@keyframes prepare-voice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#voice-section-verify.is-preparing .voice-review {
+  opacity: 0.55;
 }
 
 .voice-review {
@@ -896,6 +972,12 @@ body {
 .voice-msg.is-warn {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+.voice-msg.is-busy {
+  color: var(--text-soft);
+  border-color: var(--accent-soft);
+  background: rgba(196, 120, 77, 0.06);
 }
 
 .voice-msg.is-recording {
