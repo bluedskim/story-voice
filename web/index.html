@@ -70,7 +70,7 @@
         <p id="voice-auth-gate" class="auth-gate card" hidden>
           로그인하면 내 목소리를 저장하고, 내 목소리로 이야기를 만들 수 있어요. 다른 회원의 녹음은 들을 수 없습니다.
         </p>
-        <ol class="voice-steps" aria-label="목소리 저장 단계">
+        <ol class="voice-steps voice-steps--secondary" aria-label="목소리 저장 단계">
           <li class="voice-step is-active" data-step="1">
             <span class="voice-step-num">1</span>
             <span>녹음</span>
@@ -85,56 +85,95 @@
           </li>
         </ol>
 
-        <div class="card voice-card">
-          <p class="voice-hint">
-            대본을 읽어 녹음하거나 파일을 올려 주세요. 녹음이 대본과 맞아야 저장할 수 있어요.
-          </p>
-          <label class="field-label" for="record-script">녹음 대본</label>
-          <textarea id="record-script" class="transcript transcript-readonly" rows="5" readonly spellcheck="false"></textarea>
-
-          <div class="voice-controls">
-            <button type="button" id="record-btn" class="btn btn-primary">
-              <span class="btn-icon" aria-hidden="true">🎙</span>
+        <div class="voice-flow">
+          <section class="card voice-section" id="voice-section-record" aria-labelledby="voice-section-record-title">
+            <h2 class="voice-section-title" id="voice-section-record-title">
+              <span class="voice-section-num" aria-hidden="true">1</span>
               녹음
-            </button>
-            <button type="button" id="stop-btn" class="btn btn-secondary" disabled>멈춤</button>
-            <label class="btn btn-secondary file-label">
-              파일 올리기
-              <input type="file" id="file-input" accept="audio/*,.m4a,.mp4,.wav,.webm" hidden />
-            </label>
-          </div>
+            </h2>
+            <p class="voice-hint">
+              대본을 읽어 녹음하거나 파일을 올려 주세요. 녹음이 대본과 맞아야 저장할 수 있어요.
+            </p>
+            <label class="field-label" for="record-script">녹음 대본</label>
+            <textarea id="record-script" class="transcript transcript-readonly" rows="5" readonly spellcheck="false"></textarea>
 
-          <div class="preview-player">
-            <audio id="preview" class="preview-audio" playsinline></audio>
-            <p class="preview-label">미리 듣기</p>
-            <div class="mini-player" id="preview-player-ui" hidden>
-              <button type="button" class="mini-play" id="preview-play" aria-label="미리 듣기 재생">▶</button>
-              <span class="mini-time" id="preview-time">0:00</span>
+            <div class="voice-input-stack">
+              <div class="voice-input-primary">
+                <div class="voice-record-row">
+                  <button type="button" id="record-btn" class="btn btn-primary voice-record-btn">
+                    <span class="btn-icon record-btn-icon" aria-hidden="true">🎙</span>
+                    <span class="record-btn-label">녹음</span>
+                  </button>
+                  <button type="button" id="stop-btn" class="btn btn-secondary voice-stop-btn" disabled>멈춤</button>
+                </div>
+                <p id="voice-recording-status" class="voice-recording-status" hidden role="status">
+                  <span class="voice-recording-dot" aria-hidden="true"></span>
+                  녹음 중…
+                </p>
+              </div>
+              <p class="voice-input-or" aria-hidden="true">또는</p>
+              <label class="voice-input-secondary file-label">
+                파일 올리기
+                <input type="file" id="file-input" accept="audio/*,.m4a,.mp4,.wav,.webm" hidden />
+              </label>
             </div>
-          </div>
 
-          <button type="button" id="prepare-voice" class="btn btn-secondary btn-wide" disabled>발음 검증</button>
-        </div>
+            <div class="preview-player">
+              <audio id="preview" class="preview-audio" playsinline></audio>
+              <p class="preview-label">미리 듣기</p>
+              <div class="mini-player" id="preview-player-ui" hidden>
+                <button type="button" class="mini-play" id="preview-play" aria-label="미리 듣기 재생">▶</button>
+                <span class="mini-time" id="preview-time">0:00</span>
+              </div>
+            </div>
+          </section>
 
-        <div id="voice-review" class="card voice-review" hidden>
-          <p id="voice-meta" class="voice-meta"></p>
-          <div id="voice-match" class="voice-match" aria-live="polite">
-            <span class="match-ring" id="match-ring"></span>
-            <span class="match-text" id="match-text"></span>
-          </div>
-          <label class="field-label" for="transcript">인식 결과 (수정할 수 없음)</label>
-          <textarea
-            id="transcript"
-            class="transcript transcript-readonly"
-            rows="6"
-            readonly
-            spellcheck="false"
-            aria-readonly="true"
-          ></textarea>
-          <p id="voice-rerecord-hint" class="voice-rerecord-hint" hidden>
-            대본 일치가 낮아요. 글을 고치지 말고, 같은 대본을 다시 읽어 녹음해 주세요.
-          </p>
-          <button type="button" id="save-voice" class="btn btn-primary btn-wide">이 목소리로 저장</button>
+          <section
+            class="card voice-section"
+            id="voice-section-verify"
+            aria-labelledby="voice-section-verify-title"
+            hidden
+          >
+            <h2 class="voice-section-title" id="voice-section-verify-title">
+              <span class="voice-section-num" aria-hidden="true">2</span>
+              검증
+            </h2>
+            <p class="voice-section-lead">미리 듣기로 확인한 뒤 발음 검증을 실행해 주세요.</p>
+            <button type="button" id="prepare-voice" class="btn btn-secondary btn-wide" disabled>발음 검증</button>
+            <div id="voice-review" class="voice-review" hidden>
+              <p id="voice-meta" class="voice-meta"></p>
+              <div id="voice-match" class="voice-match" aria-live="polite">
+                <span class="match-ring" id="match-ring"></span>
+                <span class="match-text" id="match-text"></span>
+              </div>
+              <label class="field-label" for="transcript">인식 결과</label>
+              <textarea
+                id="transcript"
+                class="transcript transcript-readonly"
+                rows="6"
+                readonly
+                spellcheck="false"
+                aria-readonly="true"
+              ></textarea>
+              <p id="voice-rerecord-hint" class="voice-rerecord-hint" hidden>
+                대본 일치가 낮아요. 글을 고치지 말고, 같은 대본을 다시 읽어 녹음해 주세요.
+              </p>
+            </div>
+          </section>
+
+          <section
+            class="card voice-section"
+            id="voice-section-save"
+            aria-labelledby="voice-section-save-title"
+            hidden
+          >
+            <h2 class="voice-section-title" id="voice-section-save-title">
+              <span class="voice-section-num" aria-hidden="true">3</span>
+              저장
+            </h2>
+            <p class="voice-section-lead">검증이 통과하면 이 목소리를 저장할 수 있어요.</p>
+            <button type="button" id="save-voice" class="btn btn-primary btn-wide">이 목소리로 저장</button>
+          </section>
         </div>
 
         <p id="voice-msg" class="voice-msg" role="status"></p>

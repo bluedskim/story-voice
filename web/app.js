@@ -29,6 +29,10 @@ const previewTimeEl = document.getElementById("preview-time");
 const prepareVoiceBtn = document.getElementById("prepare-voice");
 const saveVoiceBtn = document.getElementById("save-voice");
 const voiceMsgEl = document.getElementById("voice-msg");
+const voiceSectionVerifyEl = document.getElementById("voice-section-verify");
+const voiceSectionSaveEl = document.getElementById("voice-section-save");
+const voiceRecordingStatusEl = document.getElementById("voice-recording-status");
+const recordBtnLabelEl = recordBtn.querySelector(".record-btn-label");
 const voiceReviewEl = document.getElementById("voice-review");
 const voiceMetaEl = document.getElementById("voice-meta");
 const voiceMatchEl = document.getElementById("voice-match");
@@ -103,6 +107,21 @@ function setVoiceStep(step) {
     el.classList.toggle("is-active", n === step);
     el.classList.toggle("is-done", n < step);
   });
+}
+
+function setRecordingUi(active) {
+  document.getElementById("panel-voice")?.classList.toggle("is-recording", active);
+  recordBtn.classList.toggle("is-recording", active);
+  stopBtn.classList.toggle("is-recording-stop", active);
+  if (voiceRecordingStatusEl) voiceRecordingStatusEl.hidden = !active;
+  if (recordBtnLabelEl) recordBtnLabelEl.textContent = active ? "녹음 중…" : "녹음";
+}
+
+function syncVoiceSections() {
+  const hasAudio = Boolean(pendingBlob);
+  const hasPrepared = Boolean(pendingToken);
+  if (voiceSectionVerifyEl) voiceSectionVerifyEl.hidden = !hasAudio;
+  if (voiceSectionSaveEl) voiceSectionSaveEl.hidden = !hasPrepared;
 }
 
 function setAppBusy(busy) {
@@ -584,12 +603,14 @@ function resetVoiceReview() {
   voiceMatchEl.classList.remove("is-warn");
   voiceRerecordHintEl.hidden = true;
   saveVoiceBtn.disabled = false;
+  syncVoiceSections();
   setVoiceStep(1);
 }
 
 function onAudioReady() {
   if (!generationBusy) prepareVoiceBtn.disabled = false;
   resetVoiceReview();
+  syncVoiceSections();
   previewPlayerUi.hidden = false;
   voiceMsgEl.textContent = "미리 듣고 ‘발음 검증’을 눌러 주세요.";
   voiceMsgEl.className = "voice-msg";
@@ -617,7 +638,9 @@ async function startRecording() {
   mediaRecorder.start();
   recordBtn.disabled = true;
   stopBtn.disabled = false;
-  voiceMsgEl.textContent = "녹음 중…";
+  setRecordingUi(true);
+  voiceMsgEl.textContent = "녹음 중… 멈춤을 누르면 녹음이 끝납니다.";
+  voiceMsgEl.className = "voice-msg is-recording";
   setVoiceStep(1);
 }
 
@@ -625,6 +648,7 @@ function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
     mediaRecorder.stop();
   }
+  setRecordingUi(false);
   recordBtn.disabled = generationBusy;
   stopBtn.disabled = true;
 }
@@ -681,6 +705,7 @@ async function prepareVoice() {
   voiceRerecordHintEl.hidden = !lowMatch;
   saveVoiceBtn.disabled = lowMatch;
   voiceReviewEl.hidden = false;
+  syncVoiceSections();
   voiceMsgEl.textContent = lowMatch
     ? "대본과 녹음이 맞지 않아요. 같은 대본으로 다시 녹음해 주세요."
     : "대본 일치가 충분해요. ‘이 목소리로 저장’을 눌러 주세요.";
@@ -723,6 +748,7 @@ async function saveVoice() {
   prepareVoiceBtn.disabled = true;
   saveVoiceBtn.disabled = false;
   voiceReviewEl.hidden = true;
+  syncVoiceSections();
   const bust = data.referenceVersion || Date.now();
   setPreviewToSavedReference(bust);
   setVoiceStep(3);
@@ -730,6 +756,7 @@ async function saveVoice() {
 
 recordBtn.addEventListener("click", () => {
   startRecording().catch(() => {
+    setRecordingUi(false);
     voiceMsgEl.textContent = "마이크를 사용할 수 없어요.";
     voiceMsgEl.className = "voice-msg is-error";
   });
@@ -746,6 +773,7 @@ if (location.hash === "#voice") {
   document.querySelector('.tab[data-tab="voice"]')?.click();
 }
 setVoiceStep(1);
+syncVoiceSections();
 loadConfig().catch(() => {});
 loadCatalog();
 pollGeneration();
