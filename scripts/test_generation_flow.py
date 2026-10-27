@@ -170,8 +170,8 @@ def main() -> int:
         env = test_server_env(db, mail_file, admin_emails="test-admin@example.com")
         users_root = Path(env["STORY_VOICE_USERS_DIR"])
         env["STORY_VOICE_VOICE_ASR"] = "fake"
-        short = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()[:60]
-        env["STORY_VOICE_FAKE_ASR_TEXT"] = short
+        script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
+        env["STORY_VOICE_FAKE_ASR_TEXT"] = script
         proc = subprocess.Popen(
             [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
             cwd=ROOT,
@@ -184,7 +184,6 @@ def main() -> int:
 
             from http_utils import parse_multipart_body
 
-            script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
             parsed = parse_multipart_body(
                 multipart_upload(script, b"hello", "x.txt", "text/plain"),
                 "multipart/form-data; boundary=----storyvoice",
@@ -209,7 +208,7 @@ def main() -> int:
 
             with tempfile.TemporaryDirectory() as wav_tmp:
                 wav = Path(wav_tmp) / "voice.wav"
-                make_upload_wav(wav, 8.0)
+                make_upload_wav(wav, 12.0)
                 prep_body = multipart_audio_only(wav)
                 res = http(
                     "POST",
@@ -223,7 +222,7 @@ def main() -> int:
                 assert res.status == 200
                 prep = json.loads(res.read().decode())
                 confirm = json.dumps(
-                    {"pendingToken": prep["pendingToken"], "transcript": short},
+                    {"pendingToken": prep["pendingToken"], "transcript": prep.get("transcript") or script},
                     ensure_ascii=False,
                 ).encode()
                 res = http(

@@ -97,6 +97,7 @@ def test_prepare_and_confirm_integration() -> None:
         env["STORY_VOICE_VOICE_ASR"] = "fake"
         short_asr = "가" * 40
         env["STORY_VOICE_FAKE_ASR_TEXT"] = short_asr
+        ref_script = short_asr
         proc = subprocess.Popen(
             [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
             cwd=ROOT,
@@ -114,7 +115,8 @@ def test_prepare_and_confirm_integration() -> None:
             ref_wav = users_root / str(uid) / "voice" / "reference.wav"
             ref_txt = users_root / str(uid) / "voice" / "reference.txt"
             ref_wav.parent.mkdir(parents=True, exist_ok=True)
-            ref_txt.write_text("기존 참조 텍스트\n", encoding="utf-8")
+            ref_script = "가" * 40
+            ref_txt.write_text(ref_script + "\n", encoding="utf-8")
             if ref_wav.is_file():
                 ref_wav.unlink()
             make_upload_wav(ref_wav, 8.0)
@@ -135,7 +137,7 @@ def test_prepare_and_confirm_integration() -> None:
                 prep = json.loads(res.read().decode())
                 assert prep.get("pendingToken")
                 assert prep.get("transcript") == short_asr
-                assert ref_txt.read_text(encoding="utf-8").startswith("기존")
+                assert ref_txt.read_text(encoding="utf-8").strip() == ref_script
 
                 confirm_body = json.dumps(
                     {"pendingToken": prep["pendingToken"], "transcript": short_asr},
@@ -148,7 +150,7 @@ def test_prepare_and_confirm_integration() -> None:
                     headers={"Content-Type": "application/json", **write_hdrs},
                 )
                 assert res2.status == 200
-                assert ref_txt.read_text(encoding="utf-8").strip() == short_asr
+                assert ref_txt.read_text(encoding="utf-8").strip() == ref_script
                 assert ref_wav.is_file()
                 history = list((users_root / str(uid) / "voice" / "history").glob("*"))
                 assert history, "expected backup dir"
@@ -177,16 +179,52 @@ def test_prepare_and_confirm_integration() -> None:
             proc.wait(timeout=5)
 
 
-def test_confirm_rejects_long_text_for_short_audio() -> None:
+def test_confirm_rejects_script_mismatch() -> None:
     from voice_pending import create_pending, delete_pending
     from voice_service import VoiceSaveError, confirm_voice_upload
 
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "ref.wav"
         make_upload_wav(wav, 8.0)
-        pending = create_pending(1, wav, 8.0, "가" * 40, "expected", 0.1)
+        pending = create_pending(1, wav, 8.0, "가" * 40, "다른 대본 텍스트", 0.5)
         try:
-            confirm_voice_upload(1, pending.token, "가" * 140)
+            confirm_voice_upload(1, pending.token, "가" * 40)
+            raise AssertionError("expected reject")
+        except VoiceSaveError as exc:
+            assert exc.code == "script_mismatch"
+        finally:
+            delete_pending(1, pending.token)
+
+
+def test_confirm_rejects_edited_transcript() -> None:
+    from voice_pending import create_pending, delete_pending
+    from voice_service import VoiceSaveError, confirm_voice_upload
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "ref.wav"
+        make_upload_wav(wav, 8.0)
+        script = "가" * 40
+        pending = create_pending(1, wav, 8.0, script, script, 0.0)
+        try:
+            confirm_voice_upload(1, pending.token, "나" * 40)
+            raise AssertionError("expected reject")
+        except VoiceSaveError as exc:
+            assert exc.code == "transcript_edit_forbidden"
+        finally:
+            delete_pending(1, pending.token)
+
+
+def test_confirm_rejects_asr_too_long_for_short_audio() -> None:
+    from voice_pending import create_pending, delete_pending
+    from voice_service import VoiceSaveError, confirm_voice_upload
+
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "ref.wav"
+        make_upload_wav(wav, 8.0)
+        long_asr = "가" * 140
+        pending = create_pending(1, wav, 8.0, long_asr, long_asr, 0.0)
+        try:
+            confirm_voice_upload(1, pending.token, long_asr)
             raise AssertionError("expected reject")
         except VoiceSaveError as exc:
             assert exc.code == "text_too_long_for_audio"
@@ -201,7 +239,8 @@ def test_prepare_blocked_during_generation() -> None:
         env = test_server_env(tmp_path / "auth.db", mail_file, admin_emails="test-admin@example.com")
         env["STORY_VOICE_VOICE_ASR"] = "fake"
         env["STORY_VOICE_FAKE_CHUNK_DELAY"] = "30"
-        env["STORY_VOICE_FAKE_ASR_TEXT"] = "테스트"
+        record_script = (ROOT / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
+        env["STORY_VOICE_FAKE_ASR_TEXT"] = record_script
         proc = subprocess.Popen(
             [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
             cwd=ROOT,
@@ -213,7 +252,7 @@ def test_prepare_blocked_during_generation() -> None:
             write_hdrs = auth_headers(admin)
             from test_auth_helpers import save_voice_for_session
 
-            save_voice_for_session(admin, "가" * 40)
+            save_voice_for_session(admin, record_script)
             http(
                 "POST",
                 "/api/generation/story/ui-joeun-hyeongje",
@@ -247,7 +286,9 @@ def test_prepare_blocked_during_generation() -> None:
 def main() -> int:
     test_duration_text_bounds_unit()
     test_prepare_and_confirm_integration()
-    test_confirm_rejects_long_text_for_short_audio()
+    test_confirm_rejects_script_mismatch()
+    test_confirm_rejects_edited_transcript()
+    test_confirm_rejects_asr_too_long_for_short_audio()
     test_prepare_blocked_during_generation()
     print("OK: voice upload flow tests")
     return 0

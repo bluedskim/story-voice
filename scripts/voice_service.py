@@ -35,7 +35,11 @@ MAX_UPLOAD_BYTES = 8 * 1024 * 1024  # 8 MiB raw upload
 MIN_CHARS_PER_SEC = 2.0
 MAX_CHARS_PER_SEC = 11.0
 
-WARN_EDIT_CER_THRESHOLD = 0.35
+# Reject save when recording ASR diverges too much from the script they should read.
+MAX_SCRIPT_CER_FOR_SAVE = 0.30  # ~70% match or better
+
+# Client-sent transcript must match ASR (no manual “fixes”).
+MAX_CLIENT_EDIT_CER = 0.01
 
 
 class VoiceSaveError(Exception):
@@ -224,26 +228,50 @@ def prepare_voice_upload(user_id: int, upload_path: Path, upload_size: int) -> d
     }
 
 
+def resolve_saved_transcript(pending) -> str:
+    """Pick reference text from verified script alignment (never user-edited)."""
+    expected = pending.expected_script.strip()
+    asr = pending.asr_transcript.strip()
+    if pending.script_cer <= MAX_SCRIPT_CER_FOR_SAVE and expected:
+        try:
+            validate_text_fits_duration(expected, pending.duration_sec)
+            return expected
+        except VoiceSaveError:
+            pass
+    if not asr:
+        raise VoiceSaveError("받아쓰기 결과가 없어요. 다시 녹음해 주세요.", "empty_transcript")
+    validate_text_fits_duration(asr, pending.duration_sec)
+    return asr
+
+
 def confirm_voice_upload(user_id: int, token: str, transcript: str) -> dict:
     from voice_pending import delete_pending, load_pending
 
     pending = load_pending(user_id, token)
-    transcript = transcript.strip()
-    edit_cer = character_error_rate(pending.asr_transcript, transcript) if pending.asr_transcript else 0.0
-    validate_text_fits_duration(transcript, pending.duration_sec)
+    client_text = transcript.strip()
+    if client_text and pending.asr_transcript:
+        edit_cer = character_error_rate(pending.asr_transcript, client_text)
+        if edit_cer > MAX_CLIENT_EDIT_CER:
+            raise VoiceSaveError(
+                "받아쓰기는 수정할 수 없어요. 대본과 같게 다시 녹음해 주세요.",
+                "transcript_edit_forbidden",
+            )
+
+    if pending.script_cer > MAX_SCRIPT_CER_FOR_SAVE:
+        raise VoiceSaveError(
+            "녹음이 대본과 많이 달라요. 위 대본을 그대로 읽어 다시 녹음해 주세요.",
+            "script_mismatch",
+        )
+
+    saved_transcript = resolve_saved_transcript(pending)
 
     pending_parent = user_voice_pending_dir(user_id)
     with tempfile.TemporaryDirectory(prefix="voice_commit_", dir=pending_parent) as tmp:
         staged = Path(tmp) / "reference.wav"
         shutil.copy2(pending.wav_path, staged)
-        result = commit_reference_wav(user_id, staged, transcript, pending.duration_sec)
+        result = commit_reference_wav(user_id, staged, saved_transcript, pending.duration_sec)
 
     delete_pending(user_id, token)
-    if edit_cer > WARN_EDIT_CER_THRESHOLD:
-        result["editWarning"] = (
-            "받아쓰기가 자동 인식 결과와 많이 달라요. 녹음과 글이 같다면 저장해도 괜찮아요."
-        )
-        result["editCer"] = round(edit_cer, 4)
     return result
 
 

@@ -181,7 +181,7 @@ def signup_member(
     return s
 
 
-def save_voice_for_session(session: HttpSession, transcript: str) -> None:
+def save_voice_for_session(session: HttpSession, transcript: str | None = None) -> None:
     import subprocess
     import tempfile
     from pathlib import Path
@@ -201,7 +201,7 @@ def save_voice_for_session(session: HttpSession, transcript: str) -> None:
                 "-f",
                 "lavfi",
                 "-i",
-                "sine=frequency=440:duration=8",
+                "sine=frequency=440:duration=12",
                 "-ar",
                 "24000",
                 "-ac",
@@ -235,8 +235,11 @@ def save_voice_for_session(session: HttpSession, transcript: str) -> None:
         )
         prep_res = urllib.request.urlopen(prep_req, timeout=60)
         prep = json.loads(prep_res.read().decode())
+        asr_text = (prep.get("transcript") or "").strip()
+        if transcript is not None and transcript.strip() and transcript.strip() != asr_text:
+            raise AssertionError("fake ASR must match expected transcript for voice save tests")
         confirm = json.dumps(
-            {"pendingToken": prep["pendingToken"], "transcript": transcript},
+            {"pendingToken": prep["pendingToken"], "transcript": asr_text},
             ensure_ascii=False,
         ).encode()
         conf_req = urllib.request.Request(

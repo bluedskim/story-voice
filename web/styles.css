@@ -606,6 +606,15 @@ body {
 
 .transcript-readonly {
   background: var(--surface-muted);
+  resize: none;
+  cursor: default;
+}
+
+.voice-rerecord-hint {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--warn, #c45c26);
+  line-height: 1.45;
 }
 
 .transcript {
