@@ -655,6 +655,7 @@ function resetVoiceReview() {
   matchTextEl.textContent = "";
   matchRingEl.style.setProperty("--pct", "0%");
   matchRingEl.dataset.label = "";
+  voiceMatchEl.hidden = true;
   voiceMatchEl.classList.remove("is-warn");
   voiceRerecordHintEl.hidden = true;
   saveVoiceBtn.disabled = false;
@@ -775,6 +776,7 @@ async function prepareVoice() {
     matchRingEl.dataset.label = `${pct}`;
     matchTextEl.textContent = `대본 일치 약 ${pct}% (녹음 대본 vs 자동 인식)`;
     const lowMatch = pct < VOICE_MIN_MATCH_PERCENT;
+    voiceMatchEl.hidden = false;
     voiceMatchEl.classList.toggle("is-warn", lowMatch);
     voiceRerecordHintEl.hidden = !lowMatch;
     saveVoiceBtn.disabled = lowMatch;
