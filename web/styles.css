@@ -1225,3 +1225,20 @@ body.modal-open {
 .auth-nick.bad {
   color: var(--danger);
 }
+
+.alert-modal-message {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.alert-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.alert-dialog {
+  width: min(100%, 340px);
+}

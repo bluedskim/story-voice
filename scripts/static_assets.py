@@ -12,6 +12,7 @@ CACHE_BUST_ASSETS = (
     "styles.css",
     "app.js",
     "auth.js",
+    "modal.js",
     "favicon.ico",
     "manifest.webmanifest",
     "icons/favicon.svg",
@@ -46,13 +47,24 @@ def inject_asset_versions(text: str, versions: dict[str, str]) -> str:
     return text
 
 
+def inject_module_imports(text: str, versions: dict[str, str]) -> str:
+    for rel in ("auth.js", "modal.js"):
+        ver = versions.get(rel)
+        if not ver:
+            continue
+        text = text.replace(f'from "./{rel}"', f'from "./{rel}?v={ver}"')
+    return text
+
+
 def inject_app_js_imports(text: str, versions: dict[str, str]) -> str:
-    """Cache-bust the auth.js module import resolved from app.js."""
-    ver = versions.get("auth.js")
-    if not ver:
-        return text
-    busted = f'./auth.js?v={ver}'
-    return text.replace('from "./auth.js"', f'from "{busted}"')
+    """Cache-bust relative ES module imports from app.js."""
+    return inject_module_imports(text, versions)
+
+
+def auth_js_served_body(versions: dict[str, str] | None = None) -> bytes:
+    versions = versions or web_asset_versions()
+    raw = (WEB_DIR / "auth.js").read_text(encoding="utf-8")
+    return inject_module_imports(raw, versions).encode("utf-8")
 
 
 def app_js_served_body(versions: dict[str, str] | None = None) -> bytes:

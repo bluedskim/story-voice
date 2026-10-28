@@ -29,7 +29,7 @@ from auth_csrf import CSRF_COOKIE, CSRF_HEADER, new_csrf_token, parse_cookies, v
 from auth_db import AuthDatabase
 from auth_config import ensure_session_secret
 from auth_email import is_log_mail_mode
-from static_assets import app_js_served_body, inject_asset_versions, web_asset_versions
+from static_assets import app_js_served_body, auth_js_served_body, inject_asset_versions, web_asset_versions
 from auth_service import (
     AuthError,
     login,
@@ -79,6 +79,7 @@ STATIC_FILES = {
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
     "/auth.js": ("auth.js", "application/javascript; charset=utf-8"),
+    "/modal.js": ("modal.js", "application/javascript; charset=utf-8"),
     "/catalog.json": ("catalog.json", "application/json; charset=utf-8"),
     "/favicon.ico": ("favicon.ico", "image/x-icon"),
     "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json; charset=utf-8"),
@@ -325,9 +326,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             base_route.startswith("/styles.css")
             or base_route.startswith("/app.js")
             or base_route.startswith("/auth.js")
+            or base_route.startswith("/modal.js")
         ):
             base = base_route.split("?", 1)[0].lstrip("/")
-            if base in {"styles.css", "app.js", "auth.js"}:
+            if base in {"styles.css", "app.js", "auth.js", "modal.js"}:
                 ctype = (
                     "text/css; charset=utf-8"
                     if base.endswith(".css")
@@ -685,6 +687,16 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             return False
         if filename == "app.js":
             body = app_js_served_body()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        if filename == "auth.js":
+            body = auth_js_served_body()
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
