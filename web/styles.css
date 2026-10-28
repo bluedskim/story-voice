@@ -748,6 +748,14 @@ body {
   display: none !important;
 }
 
+/* `.voice-section` / `.voice-review` set `display: flex` and can show `[hidden]` sections */
+#voice-section-verify[hidden],
+#voice-section-save[hidden],
+.voice-review[hidden],
+#voice-match[hidden] {
+  display: none !important;
+}
+
 .voice-recording-dot {
   width: 0.55rem;
   height: 0.55rem;
