@@ -14,6 +14,11 @@ function notify() {
   listeners.forEach((fn) => fn(authUser));
 }
 
+/** Sync auth-dependent UI (e.g. header bar) after silent config refresh. */
+export function notifyAuthChange() {
+  notify();
+}
+
 export function getAuthUser() {
   return authUser;
 }

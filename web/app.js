@@ -4,6 +4,7 @@ import {
   initAuthUi,
   onAuthChange,
   refreshAuthFromConfig,
+  notifyAuthChange,
 } from "./auth.js";
 
 const listEl = document.getElementById("story-list");
@@ -73,6 +74,22 @@ let generationBusy = false;
 let seekDragging = false;
 let previewSeekDragging = false;
 let prepareVoiceBusy = false;
+
+const LOGIN_REQUIRED_MSG =
+  "로그인이 필요해요. 로그인하면 내 목소리를 저장하고, 내 목소리로 이야기를 만들 수 있어요.";
+
+function warnLoginRequired({ voice = false } = {}) {
+  if (canWrite()) return false;
+  if (voice && voiceMsgEl) {
+    voiceMsgEl.textContent = LOGIN_REQUIRED_MSG;
+    voiceMsgEl.className = "voice-msg is-warn";
+  } else {
+    showGenStatus(LOGIN_REQUIRED_MSG, true);
+  }
+  return true;
+}
+
+let initialAuthUiSynced = false;
 
 let mediaRecorder = null;
 let recordChunks = [];
@@ -155,6 +172,10 @@ function applyConfigData(data) {
 async function loadConfig() {
   const data = await refreshAuthFromConfig({ notify: false });
   applyConfigData(data);
+  if (!initialAuthUiSynced) {
+    initialAuthUiSynced = true;
+    notifyAuthChange();
+  }
 }
 
 function updateWriteGates() {
@@ -163,7 +184,7 @@ function updateWriteGates() {
   if (voiceAuthGateEl) {
     voiceAuthGateEl.hidden = allowed;
   }
-  regenAllBtn.disabled = generationBusy || !allowed;
+  regenAllBtn.disabled = generationBusy || (allowed && !hasPersonalVoice);
   if (regenAsrWrapEl) regenAsrWrapEl.hidden = !allowed;
   if (regenAsrVerifyEl) regenAsrVerifyEl.disabled = generationBusy || !allowed;
   if (!allowed) {
@@ -175,7 +196,8 @@ function updateWriteGates() {
     if (pendingBlob) prepareVoiceBtn.disabled = false;
   }
   document.querySelectorAll(".regen-btn").forEach((btn) => {
-    if (btn.tagName === "BUTTON") btn.disabled = generationBusy || !allowed;
+    if (btn.tagName !== "BUTTON") return;
+    btn.disabled = generationBusy || (canWrite() && !hasPersonalVoice);
   });
 }
 
@@ -281,9 +303,11 @@ function render() {
     const personalLabel = story.hasPersonalAudio ? "내 목소리로 다시 만들기" : "내 목소리로 만들기";
     regen.textContent = personalLabel;
     regen.addEventListener("click", () => enqueueStory(story.id));
-    regen.disabled = !canWrite() || !hasPersonalVoice;
-    if (!hasPersonalVoice) {
+    regen.disabled = generationBusy || (canWrite() && !hasPersonalVoice);
+    if (!hasPersonalVoice && canWrite()) {
       regen.title = "목소리 탭에서 내 목소리를 먼저 저장해 주세요";
+    } else {
+      regen.removeAttribute("title");
     }
 
     const actions = document.createElement("div");
@@ -435,6 +459,7 @@ function generationRequestBody() {
 }
 
 async function enqueueStory(id) {
+  if (warnLoginRequired()) return;
   const res = await apiFetch(`/api/generation/story/${id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -450,6 +475,7 @@ async function enqueueStory(id) {
 }
 
 async function enqueueAll() {
+  if (warnLoginRequired()) return;
   const res = await apiFetch("/api/generation/all", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -674,6 +700,7 @@ function onAudioReady() {
 }
 
 async function startRecording() {
+  if (warnLoginRequired({ voice: true })) return;
   voiceMsgEl.textContent = "";
   voiceMsgEl.className = "voice-msg";
   resetVoiceReview();
@@ -711,6 +738,7 @@ function stopRecording() {
 
 function onFileSelected(file) {
   if (!file) return;
+  if (warnLoginRequired({ voice: true })) return;
   pendingBlob = file;
   setPreviewToPending(file);
   onAudioReady();
@@ -754,6 +782,7 @@ function voiceFormData() {
 }
 
 async function prepareVoice() {
+  if (warnLoginRequired({ voice: true })) return;
   if (!pendingBlob || generationBusy || prepareVoiceBusy) return;
   setPrepareVoiceBusy(true);
   prepareVoiceBtn.disabled = true;
@@ -794,6 +823,7 @@ async function prepareVoice() {
 }
 
 async function saveVoice() {
+  if (warnLoginRequired({ voice: true })) return;
   if (!pendingToken) {
     voiceMsgEl.textContent = "먼저 ‘발음 검증’을 해 주세요.";
     voiceMsgEl.className = "voice-msg is-error";

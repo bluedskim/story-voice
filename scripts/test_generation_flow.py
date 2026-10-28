@@ -317,9 +317,9 @@ def main() -> int:
 
             try:
                 http("GET", "/audio/does-not-exist.m4a?download=1")
-                raise AssertionError("expected 401 without login")
+                raise AssertionError("expected 404 without login for unknown story")
             except urllib.error.HTTPError as exc:
-                assert exc.code == 401
+                assert exc.code == 404
             try:
                 http(
                     "GET",
