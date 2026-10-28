@@ -197,6 +197,37 @@ def test_chunk_lead_preserves_soft_onset() -> None:
         assert after_peak >= before_peak * 0.45
 
 
+def test_chunk_lead_fade_aligns_with_speech_onset() -> None:
+    """Regression: fade at t=0 only affects TTS padding; speech attack stays abrupt."""
+    import numpy as np
+    import wave
+
+    from audio_post import speech_onset_sample
+
+    sr = 24000
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "padded_tts.wav"
+        n_lead = int(0.12 * sr)
+        n_speech = int(0.25 * sr)
+        sig = np.zeros(n_lead + n_speech, dtype=np.float32)
+        sig[:n_lead] = np.random.default_rng(0).normal(0, 0.002, n_lead).astype(np.float32)
+        t = np.arange(n_speech, dtype=np.float64) / sr
+        sig[n_lead:] = (0.28 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        with wave.open(str(src), "w") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes((sig * 32767).astype(np.int16).tobytes())
+        onset = speech_onset_sample(sig, sr)
+        assert onset >= n_lead - sr // 50  # ~120 ms lead
+        raw_attack = float(np.max(np.abs(sig[onset : onset + int(0.008 * sr)])))
+        apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
+        out = load_mono_float_samples(src)
+        soft_attack = float(np.max(np.abs(out[onset : onset + int(0.008 * sr)])))
+        assert raw_attack > 0.15
+        assert soft_attack < raw_attack * 0.35
+
+
 def test_chunk_tail_pad_extends_duration() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "in.wav"
@@ -477,6 +508,7 @@ def main() -> int:
     test_tail_has_limiter_without_fade_out()
     test_chunk_lead_cleanup_removes_pre_speech_click()
     test_chunk_lead_preserves_soft_onset()
+    test_chunk_lead_fade_aligns_with_speech_onset()
     test_chunk_tail_pad_extends_duration()
     test_tail_guard_extra_on_tight_tts_end()
     test_tail_guard_skips_extra_when_trailing_silence_present()

@@ -135,10 +135,14 @@ def wav_rms_mean_db(path: Path) -> float:
     return 20.0 * float(np.log10(rms))
 
 
-def build_dialogue_middle_chain(sample_rate: int) -> tuple[str, PitchMethod]:
+def build_dialogue_middle_chain(
+    sample_rate: int,
+    fade_st_sec: float = 0.0,
+) -> tuple[str, PitchMethod]:
     """Fade-in plus optional pitch, gain, and EQ (no fade-out, no loudness match)."""
     fade = dialogue_fade_sec()
-    parts: list[str] = [f"afade=t=in:st=0:d={fade:.4f}"]
+    st = max(0.0, fade_st_sec)
+    parts: list[str] = [f"afade=t=in:st={st:.6f}:d={fade:.4f}"]
     pitch_method: PitchMethod = "none"
     pitch_st = dialogue_pitch_semitones()
     if abs(pitch_st) > 1e-9:
@@ -335,14 +339,15 @@ def apply_chunk_lead_fade_in(input_wav: Path, sample_rate: int = 24000, fade_sec
     """Strip isolated leading clicks then fade-in at speech onset before hard concat."""
     samples = load_mono_float_samples(input_wav)
     onset = speech_onset_sample(samples, sample_rate)
-    fade_start = 0
+    # TTS often leaves 80–200 ms of quiet padding before speech; fading only at t=0
+    # ramps the padding, not the syllable attack (audible "탁" at each sentence start).
+    fade_start = onset
     if chunk_lead_strip_enabled():
         start, end = leading_glitch_mute_range(samples, onset, sample_rate)
         if end > start:
             cleared = samples.copy()
             cleared[start:end] = 0.0
             _write_mono_wav(input_wav, cleared, sample_rate)
-            fade_start = onset
     fade = fade_sec if fade_sec is not None else chunk_lead_fade_sec()
     if fade <= 1e-6:
         return
@@ -427,7 +432,9 @@ def apply_dialogue_style(input_wav: Path, output_wav: Path, sample_rate: int = 2
         return "none"
 
     mean_in = volumedetect_mean_db(input_wav)
-    middle_af, pitch_method = build_dialogue_middle_chain(sample_rate)
+    onset_samples = speech_onset_sample(load_mono_float_samples(input_wav), sample_rate)
+    fade_st_sec = onset_samples / float(sample_rate)
+    middle_af, pitch_method = build_dialogue_middle_chain(sample_rate, fade_st_sec=fade_st_sec)
 
     with tempfile.TemporaryDirectory(prefix="dialogue_af_") as tmp:
         mid = Path(tmp) / "mid.wav"
