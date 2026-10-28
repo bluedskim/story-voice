@@ -1,3 +1,5 @@
+import { closeModal, initAlertModal, openModal } from "./modal.js";
+
 /** @typedef {{ nickname: string, canWrite: boolean }} AuthUser */
 
 let csrfToken = "";
@@ -130,7 +132,18 @@ export async function checkNickname(nickname) {
   return data.available;
 }
 
+export function openAuthModal(kind = "login") {
+  const loginModal = document.getElementById("modal-login");
+  const signupModal = document.getElementById("modal-signup");
+  if (kind === "signup") {
+    openModal(signupModal);
+  } else {
+    openModal(loginModal);
+  }
+}
+
 export function initAuthUi() {
+  initAlertModal();
   const bar = document.getElementById("auth-bar");
   const loginBtn = document.getElementById("auth-login-btn");
   const signupBtn = document.getElementById("auth-signup-btn");
@@ -153,17 +166,8 @@ export function initAuthUi() {
 
   onAuthChange(renderBar);
 
-  function openModal(el) {
-    el.hidden = false;
-    document.body.classList.add("modal-open");
-  }
-  function closeModal(el) {
-    el.hidden = true;
-    document.body.classList.remove("modal-open");
-  }
-
-  loginBtn?.addEventListener("click", () => openModal(loginModal));
-  signupBtn?.addEventListener("click", () => openModal(signupModal));
+  loginBtn?.addEventListener("click", () => openAuthModal("login"));
+  signupBtn?.addEventListener("click", () => openAuthModal("signup"));
   document.querySelectorAll("[data-close-modal]").forEach((btn) => {
     btn.addEventListener("click", () => {
       closeModal(loginModal);

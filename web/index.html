@@ -233,6 +233,14 @@
       <button type="button" id="np-play" class="np-play" aria-label="일시정지">⏸</button>
     </aside>
 
+    <dialog id="modal-alert" class="auth-modal" hidden>
+      <div class="auth-form card alert-dialog" role="alertdialog" aria-labelledby="alert-modal-title" aria-describedby="alert-modal-message">
+        <h2 id="alert-modal-title" class="auth-title">알림</h2>
+        <p id="alert-modal-message" class="alert-modal-message"></p>
+        <div id="alert-modal-actions" class="alert-modal-actions"></div>
+      </div>
+    </dialog>
+
     <dialog id="modal-login" class="auth-modal" hidden>
       <form id="login-form" class="auth-form card">
         <h2 class="auth-title">로그인</h2>

@@ -3,9 +3,11 @@ import {
   canWrite,
   initAuthUi,
   onAuthChange,
+  openAuthModal,
   refreshAuthFromConfig,
   notifyAuthChange,
 } from "./auth.js";
+import { showAlertModal } from "./modal.js";
 
 const listEl = document.getElementById("story-list");
 const voiceAuthGateEl = document.getElementById("voice-auth-gate");
@@ -78,14 +80,40 @@ let prepareVoiceBusy = false;
 const LOGIN_REQUIRED_MSG =
   "로그인이 필요해요. 로그인하면 내 목소리를 저장하고, 내 목소리로 이야기를 만들 수 있어요.";
 
-function warnLoginRequired({ voice = false } = {}) {
+function showVoiceBlockingAlert(message, { title = "목소리 저장" } = {}) {
+  showAlertModal({
+    title,
+    message,
+    buttons: [{ label: "확인", primary: true }],
+  });
+}
+
+function showGenerationBlockingAlert(message, { title = "이야기 만들기" } = {}) {
+  showAlertModal({
+    title,
+    message,
+    buttons: [{ label: "확인", primary: true }],
+  });
+}
+
+function warnLoginRequired() {
   if (canWrite()) return false;
-  if (voice && voiceMsgEl) {
-    voiceMsgEl.textContent = LOGIN_REQUIRED_MSG;
-    voiceMsgEl.className = "voice-msg is-warn";
-  } else {
-    showGenStatus(LOGIN_REQUIRED_MSG, true);
-  }
+  showAlertModal({
+    title: "로그인이 필요해요",
+    message: LOGIN_REQUIRED_MSG,
+    buttons: [
+      {
+        label: "로그인",
+        primary: true,
+        onClick: () => openAuthModal("login"),
+      },
+      {
+        label: "회원가입",
+        onClick: () => openAuthModal("signup"),
+      },
+      { label: "닫기" },
+    ],
+  });
   return true;
 }
 
@@ -467,7 +495,7 @@ async function enqueueStory(id) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    showGenStatus(data.error || "요청하지 못했어요.", true);
+    showGenerationBlockingAlert(data.error || "요청하지 못했어요.");
     return;
   }
   showGenStatus("이야기를 만드는 중…");
@@ -483,7 +511,7 @@ async function enqueueAll() {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    showGenStatus(data.error || "요청하지 못했어요.", true);
+    showGenerationBlockingAlert(data.error || "요청하지 못했어요.");
     return;
   }
   showGenStatus("전체 이야기를 만드는 중…");
@@ -532,7 +560,7 @@ async function pollGeneration() {
   setAppBusy(false);
   const last = data.recent?.[0];
   if (last?.state === "failed") {
-    showGenStatus(last.error || "실패했어요.", true);
+    showGenerationBlockingAlert(last.error || "실패했어요.");
     stopPolling();
     return;
   }
@@ -700,7 +728,7 @@ function onAudioReady() {
 }
 
 async function startRecording() {
-  if (warnLoginRequired({ voice: true })) return;
+  if (warnLoginRequired()) return;
   voiceMsgEl.textContent = "";
   voiceMsgEl.className = "voice-msg";
   resetVoiceReview();
@@ -738,7 +766,7 @@ function stopRecording() {
 
 function onFileSelected(file) {
   if (!file) return;
-  if (warnLoginRequired({ voice: true })) return;
+  if (warnLoginRequired()) return;
   pendingBlob = file;
   setPreviewToPending(file);
   onAudioReady();
@@ -782,7 +810,7 @@ function voiceFormData() {
 }
 
 async function prepareVoice() {
-  if (warnLoginRequired({ voice: true })) return;
+  if (warnLoginRequired()) return;
   if (!pendingBlob || generationBusy || prepareVoiceBusy) return;
   setPrepareVoiceBusy(true);
   prepareVoiceBtn.disabled = true;
@@ -792,8 +820,7 @@ async function prepareVoice() {
     const res = await apiFetch("/api/voice/prepare", { method: "POST", body: voiceFormData() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      voiceMsgEl.textContent = data.error || "받아쓰기에 실패했어요.";
-      voiceMsgEl.className = "voice-msg is-error";
+      showVoiceBlockingAlert(data.error || "받아쓰기에 실패했어요.");
       return;
     }
     pendingToken = data.pendingToken;
@@ -823,15 +850,13 @@ async function prepareVoice() {
 }
 
 async function saveVoice() {
-  if (warnLoginRequired({ voice: true })) return;
+  if (warnLoginRequired()) return;
   if (!pendingToken) {
-    voiceMsgEl.textContent = "먼저 ‘발음 검증’을 해 주세요.";
-    voiceMsgEl.className = "voice-msg is-error";
+    showVoiceBlockingAlert("먼저 ‘발음 검증’을 해 주세요.");
     return;
   }
   if (!voiceCanSave) {
-    voiceMsgEl.textContent = "대본과 녹음이 맞지 않아요. 같은 대본으로 다시 녹음해 주세요.";
-    voiceMsgEl.className = "voice-msg is-warn";
+    showVoiceBlockingAlert("대본과 녹음이 맞지 않아요. 같은 대본으로 다시 녹음해 주세요.");
     return;
   }
   saveVoiceBtn.disabled = true;
@@ -843,8 +868,7 @@ async function saveVoice() {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    voiceMsgEl.textContent = data.error || "저장하지 못했어요.";
-    voiceMsgEl.className = "voice-msg is-error";
+    showVoiceBlockingAlert(data.error || "저장하지 못했어요.");
     saveVoiceBtn.disabled = !voiceCanSave;
     return;
   }
@@ -867,8 +891,7 @@ async function saveVoice() {
 recordBtn.addEventListener("click", () => {
   startRecording().catch(() => {
     setRecordingUi(false);
-    voiceMsgEl.textContent = "마이크를 사용할 수 없어요.";
-    voiceMsgEl.className = "voice-msg is-error";
+    showVoiceBlockingAlert("마이크를 사용할 수 없어요.", { title: "녹음" });
   });
 });
 stopBtn.addEventListener("click", stopRecording);
