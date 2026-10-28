@@ -106,20 +106,28 @@ def build_manifest(
 
 
 def build_public_catalog(stories_dir: Path | None = None) -> dict:
-    """Story list for anonymous visitors — no per-user audio."""
+    """Story list for anonymous visitors — default narration only (data/audio/default)."""
+    from default_narration import default_story_audio
+
     stories = list_stories(stories_dir)
     items = []
     for story in stories:
-        items.append(
-            {
-                "id": story.id,
-                "title": story.title,
-                "order": story.order,
-                "text": story.body,
-                "hasAudio": False,
-            }
-        )
-    return {"stories": items, "requiresLoginForAudio": True}
+        default = default_story_audio(story.id).is_file()
+        entry = {
+            "id": story.id,
+            "title": story.title,
+            "order": story.order,
+            "text": story.body,
+            "hasAudio": default,
+            "hasPersonalAudio": False,
+            "hasDefaultAudio": default,
+            "canGeneratePersonal": False,
+        }
+        if default:
+            entry["audioUrl"] = f"/audio/{story.id}.m4a"
+            entry["audioSource"] = "default"
+        items.append(entry)
+    return {"stories": items}
 
 
 def write_manifest(

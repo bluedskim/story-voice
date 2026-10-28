@@ -53,7 +53,7 @@ from http_utils import (
 )
 from rate_limit import RateLimiter
 from story_catalog import build_manifest, build_public_catalog, write_manifest
-from default_narration import resolve_story_audio_path
+from default_narration import default_story_audio, resolve_story_audio_path
 from user_storage import (
     has_user_reference,
     migrate_legacy_voice_for_admin,
@@ -608,9 +608,6 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
 
     def _serve_audio(self, route: str, as_download: bool = False) -> None:
         user = self._current_user()
-        if not user:
-            self._send_error(HTTPStatus.UNAUTHORIZED)
-            return
         name = route[len("/audio/") :]
         if "/" in name or name != Path(name).name:
             self._send_error(HTTPStatus.NOT_FOUND)
@@ -626,7 +623,11 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         if story_id not in titles:
             self._send_error(HTTPStatus.NOT_FOUND)
             return
-        resolved = resolve_story_audio_path(user.id, story_id)
+        if user:
+            resolved = resolve_story_audio_path(user.id, story_id)
+        else:
+            guest_default = default_story_audio(story_id)
+            resolved = guest_default if guest_default.is_file() else None
         if resolved is None:
             self._send_error(HTTPStatus.NOT_FOUND)
             return
