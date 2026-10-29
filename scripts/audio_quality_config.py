@@ -21,7 +21,7 @@ DEFAULT_DIALOGUE_GAIN_DB = 0.0
 DEFAULT_DIALOGUE_FADE_SEC = 0.012
 # Attenuate TTS mouth-click / leading glitch at chunk boundaries (narration + dialogue w/o style)
 DEFAULT_CHUNK_LEAD_FADE_SEC = 0.025
-DEFAULT_CHUNK_LEAD_STRIP = True
+DEFAULT_CHUNK_LEAD_STRIP = False
 # Peak limit after loudness match (~-1 dBFS); chunk tail pad handles concat boundaries
 DIALOGUE_PEAK_LIMITER = "alimiter=limit=0.89:level=false"
 
