@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -278,12 +279,72 @@ def test_rate_limit_send_verification() -> None:
             proc.wait(timeout=5)
 
 
+def test_signup_source_saved_and_invalid_dropped() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        db = tmp_path / "auth.db"
+        mail_file = tmp_path / "mail.jsonl"
+        proc = start_server(db, mail_file)
+        try:
+            s = HttpSession(f"http://127.0.0.1:{PORT}")
+            wait_server(s)
+            email = "channel@example.com"
+            s.post_json("/api/users/signup/send-verification", {"loginId": email})
+            code = read_last_mail_code(mail_file)
+            status, data, _ = s.post_json(
+                "/api/users/signup",
+                {
+                    "loginId": email,
+                    "nickname": "채널",
+                    "password": "secret123",
+                    "verificationCode": code,
+                    "signupSource": "  Newsletter_2024!!  ",
+                },
+            )
+            assert status == 201, data
+            conn = sqlite3.connect(db)
+            row = conn.execute(
+                "SELECT signup_source FROM users WHERE email = ? COLLATE NOCASE",
+                (email,),
+            ).fetchone()
+            conn.close()
+            assert row is not None
+            assert row[0] == "newsletter_2024"
+
+            email2 = "bad@example.com"
+            s.post_json("/api/users/signup/send-verification", {"loginId": email2})
+            code2 = read_last_mail_code(mail_file)
+            status2, _, _ = s.post_json(
+                "/api/users/signup",
+                {
+                    "loginId": email2,
+                    "nickname": "나쁨",
+                    "password": "secret123",
+                    "verificationCode": code2,
+                    "signupSource": "@@@",
+                },
+            )
+            assert status2 == 201
+            conn = sqlite3.connect(db)
+            row2 = conn.execute(
+                "SELECT signup_source FROM users WHERE email = ? COLLATE NOCASE",
+                (email2,),
+            ).fetchone()
+            conn.close()
+            assert row2 is not None
+            assert row2[0] is None
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
 def main() -> int:
     test_signup_login_logout()
     test_nickname_available()
     test_gating_and_csrf()
     test_admin_role_follows_env_list()
     test_rate_limit_send_verification()
+    test_signup_source_saved_and_invalid_dropped()
     print("OK: auth flow tests")
     return 0
 
