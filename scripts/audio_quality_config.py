@@ -22,6 +22,16 @@ DEFAULT_DIALOGUE_FADE_SEC = 0.012
 # Attenuate TTS mouth-click / leading glitch at chunk boundaries (narration + dialogue w/o style)
 DEFAULT_CHUNK_LEAD_FADE_SEC = 0.025
 DEFAULT_CHUNK_LEAD_STRIP = False
+# TTS sentence endings: Qwen3-TTS voice clones sometimes stop the last syllable abruptly
+# (loud -> silence within ~10ms). Appending " …" to the TTS *input* text only (display text,
+# manifests and ASR reference stay original) makes the model close the syllable naturally.
+DEFAULT_TTS_TRAILING_ELLIPSIS = True
+# Abrupt-ending detector on each raw TTS chunk; regenerate up to N extra takes, keep the best.
+DEFAULT_TAIL_ABRUPT_RETRIES = 2
+DEFAULT_TAIL_ABRUPT_HI_DB = -20.0  # last "still loud" frame (dB rel. chunk peak)
+DEFAULT_TAIL_ABRUPT_LO_DB = -50.0  # silence floor (dB rel. chunk peak)
+DEFAULT_TAIL_ABRUPT_MAX_DECAY_MS = 10.0  # hi -> lo within this many ms => abrupt
+DEFAULT_TAIL_ABRUPT_EOF_DB = -35.0  # file ends while last 10ms frame is still above this => abrupt
 # Peak limit after loudness match (~-1 dBFS); chunk tail pad handles concat boundaries
 DIALOGUE_PEAK_LIMITER = "alimiter=limit=0.89:level=false"
 
@@ -84,6 +94,35 @@ def chunk_lead_fade_sec() -> float:
 def chunk_lead_strip_enabled() -> bool:
     """Drop isolated leading energy before sustained speech (TTS mouth-click in padding)."""
     return _bool_env("STORY_VOICE_CHUNK_LEAD_STRIP", DEFAULT_CHUNK_LEAD_STRIP)
+
+
+def tts_trailing_ellipsis_enabled() -> bool:
+    """Append " …" to each chunk's TTS input text (not to display / ASR reference text)."""
+    return _bool_env("STORY_VOICE_TTS_TRAILING_ELLIPSIS", DEFAULT_TTS_TRAILING_ELLIPSIS)
+
+
+def tail_abrupt_retries() -> int:
+    """Extra TTS takes when a raw chunk ends abruptly (0 disables detection retries)."""
+    raw = os.environ.get("STORY_VOICE_TAIL_ABRUPT_RETRIES", "").strip()
+    if not raw:
+        return DEFAULT_TAIL_ABRUPT_RETRIES
+    return max(0, min(10, int(raw)))
+
+
+def tail_abrupt_max_decay_ms() -> float:
+    return max(0.0, _float_env("STORY_VOICE_TAIL_ABRUPT_MAX_DECAY_MS", DEFAULT_TAIL_ABRUPT_MAX_DECAY_MS))
+
+
+def tail_abrupt_hi_db() -> float:
+    return _float_env("STORY_VOICE_TAIL_ABRUPT_HI_DB", DEFAULT_TAIL_ABRUPT_HI_DB)
+
+
+def tail_abrupt_lo_db() -> float:
+    return _float_env("STORY_VOICE_TAIL_ABRUPT_LO_DB", DEFAULT_TAIL_ABRUPT_LO_DB)
+
+
+def tail_abrupt_eof_db() -> float:
+    return _float_env("STORY_VOICE_TAIL_ABRUPT_EOF_DB", DEFAULT_TAIL_ABRUPT_EOF_DB)
 
 
 def chunk_tail_pad_sec() -> float:

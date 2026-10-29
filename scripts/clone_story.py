@@ -88,6 +88,19 @@ def post_process_chunk_wav(
     apply_chunk_tail_pad(chunk_path, sr)
 
 
+def _tts_generate_audio(model, kw: dict):
+    import numpy as np
+
+    try:
+        results = list(model.generate(**kw))
+    except TypeError:
+        kw.pop("lang_code", None)
+        results = list(model.generate(**kw))
+    audio = np.concatenate([np.array(r.audio, dtype=np.float32).reshape(-1) for r in results])
+    sr = int(getattr(results[0], "sample_rate", getattr(model, "sample_rate", 24000)))
+    return audio, sr
+
+
 def synthesize_chunk_to_wav(
     model,
     chunk: tuple[str, str, str],
@@ -97,25 +110,45 @@ def synthesize_chunk_to_wav(
     out_path: Path,
     dialogue_style: bool,
 ) -> int:
-    import numpy as np
     from mlx_audio import audio_io as sf
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from audio_quality_config import tail_abrupt_retries
+    from tts_tail import analyze_tail, tts_input_text
 
     text, _pause_kind, role = chunk
     kw: dict = dict(
-        text=text,
+        # TTS input only: chunk text stays original for display, manifests and ASR verify.
+        text=tts_input_text(text),
         ref_audio=voice_ref.audio_array(),
         ref_text=voice_ref.text,
         lang_code=lang,
     )
     if temperature is not None:
         kw["temperature"] = temperature
-    try:
-        results = list(model.generate(**kw))
-    except TypeError:
-        kw.pop("lang_code", None)
-        results = list(model.generate(**kw))
-    audio = np.concatenate([np.array(r.audio, dtype=np.float32).reshape(-1) for r in results])
-    sr = int(getattr(results[0], "sample_rate", getattr(model, "sample_rate", 24000)))
+
+    max_takes = 1 + tail_abrupt_retries()
+    best = None  # (score, audio, sr, analysis)
+    for take in range(1, max_takes + 1):
+        audio, sr = _tts_generate_audio(model, kw)
+        tail = analyze_tail(audio, sr)
+        if best is None or tail.score > best[0]:
+            best = (tail.score, audio, sr, tail)
+        if not tail.abrupt:
+            break
+        if take < max_takes:
+            print(
+                f"  abrupt TTS ending (decay {tail.decay_ms:.0f}ms, last {tail.last_frame_db:.0f}dB, "
+                f"take {take}/{max_takes}) — regenerating :: {text[:30]}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"  abrupt TTS ending persists after {max_takes} takes — keeping best "
+                f"(decay {best[3].decay_ms:.0f}ms) :: {text[:30]}",
+                file=sys.stderr,
+            )
+    _score, audio, sr, _tail = best
     sf.write(str(out_path), audio, sr)
     post_process_chunk_wav(out_path, role, sr, dialogue_style)
     return sr

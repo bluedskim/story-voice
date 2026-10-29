@@ -95,6 +95,14 @@ python scripts/clone_story.py content/stories/ui-joeun-hyeongje.txt \
 
 각 TTS 청크는 후처리(EQ 등) **이후** 무음을 붙입니다 (내레이션·대사 공통). **모든 줄**에 기본 **25ms** (`STORY_VOICE_CHUNK_TAIL_PAD_SEC`, 기본 `0.025`)를 더하고, TTS 꼬리가 거의 없이 딱 끊긴 경우에만 **추가 65ms** (`STORY_VOICE_CHUNK_TAIL_GUARD_EXTRA_SEC`, 기본 `0.065`, `STORY_VOICE_CHUNK_TAIL_GUARD=1` 기본)를 더해 tight 끝 **합계 약 90ms** — 여유 있게 끝나는 줄은 baseline **25ms만** 추가됩니다 (tight일 때만 pad하는 방식이 아님).
 
+**문장 끝 처리 (TTS 입력)** — Qwen3-TTS 음성 복제가 마지막 음절을 아직 큰 소리일 때 10ms 안에 끊는 경우가 있어(특히 Harry 참조 음성), 합성 단계에서 막습니다. 후처리는 무음만 덧붙이므로 이미 끊긴 소리는 되살리지 못합니다.
+
+| 환경 변수 | 설명 |
+|-----------|------|
+| `STORY_VOICE_TTS_TRAILING_ELLIPSIS` | 청크 TTS **입력**에만 끝에 ` …` 추가 (기본 `1`). 화면 이야기 글·매니페스트·ASR 발음 검증은 원래 문장 그대로. 이미 `…`/`...`로 끝나면 그대로 |
+| `STORY_VOICE_TAIL_ABRUPT_RETRIES` | 원본 청크 끝이 뚝 끊기면 다시 생성하는 최대 횟수 (기본 `2`, `0`이면 끔). 가장 자연스럽게 잦아드는 테이크를 사용 |
+| `STORY_VOICE_TAIL_ABRUPT_MAX_DECAY_MS` | 10ms 프레임 기준 -20dB→-50dB(피크 대비) 감쇠가 이 값 이하이면 끊김 (기본 `10`). `..._HI_DB`(-20) / `..._LO_DB`(-50) / `..._EOF_DB`(-35, 파일이 이보다 큰 소리로 끝나면 끊김)로 조정 |
+
 대사 청크 처리 순서: 페이드 인 → (선택) 피치/게인 → EQ → **입력 평균 음량에 맞춤** → 피크 리미터 (`alimiter`, 약 -1 dBFS). (페이드 아웃은 제거 — concat 직전 무음 패드로 경계 처리)
 
 **이야기 전체 마무리**
