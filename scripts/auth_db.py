@@ -30,6 +30,7 @@ class UserRow:
     password_hash: str
     user_type: str
     created_at: float
+    signup_source: str | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -98,6 +99,8 @@ class AuthDatabase:
                         "ALTER TABLE email_verifications ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0"
                     )
                     conn.execute("UPDATE email_verifications SET failed_attempts = attempts")
+                if "signup_source" not in cols:
+                    conn.execute("ALTER TABLE users ADD COLUMN signup_source TEXT")
                 conn.commit()
             finally:
                 conn.close()
@@ -135,21 +138,28 @@ class AuthDatabase:
             finally:
                 conn.close()
 
-    def create_user(self, email: str, nickname: str, password_hash: str, user_type: str) -> UserRow:
+    def create_user(
+        self,
+        email: str,
+        nickname: str,
+        password_hash: str,
+        user_type: str,
+        signup_source: str | None = None,
+    ) -> UserRow:
         now = time.time()
         with self._lock:
             conn = self._connect()
             try:
                 cur = conn.execute(
                     """
-                    INSERT INTO users (email, nickname, password_hash, user_type, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO users (email, nickname, password_hash, user_type, created_at, signup_source)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (email, nickname, password_hash, user_type, now),
+                    (email, nickname, password_hash, user_type, now, signup_source),
                 )
                 conn.commit()
                 uid = int(cur.lastrowid)
-                return UserRow(uid, email, nickname, password_hash, user_type, now)
+                return UserRow(uid, email, nickname, password_hash, user_type, now, signup_source)
             finally:
                 conn.close()
 
@@ -294,6 +304,9 @@ def _row_to_user(row: sqlite3.Row) -> UserRow:
         user_type = str(row["user_type"])
     else:
         user_type = USER_TYPE_ADMIN if bool(row["is_admin"]) else USER_TYPE_MEMBER
+    signup_source = None
+    if "signup_source" in row.keys() and row["signup_source"] is not None:
+        signup_source = str(row["signup_source"])
     return UserRow(
         id=int(row["id"]),
         email=str(row["email"]),
@@ -301,4 +314,5 @@ def _row_to_user(row: sqlite3.Row) -> UserRow:
         password_hash=str(row["password_hash"]),
         user_type=user_type,
         created_at=float(row["created_at"]),
+        signup_source=signup_source,
     )

@@ -16,6 +16,7 @@ from auth_db import USER_TYPE_ADMIN, USER_TYPE_MEMBER, AuthDatabase, UserRow
 from auth_email import EmailSendError, send_verification_email
 from auth_password import hash_password, verify_password
 from rate_limit import RateLimiter
+from signup_source import normalize_signup_source
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 NICKNAME_RE = re.compile(r"^[a-zA-Z0-9_가-힣]{2,12}$")
@@ -155,6 +156,7 @@ def signup(
     verification_code: str,
     client_ip: str,
     after_create: Callable[[UserRow], None] | None = None,
+    signup_source: object = None,
 ) -> UserRow:
     email = normalize_email(login_id)
     nickname = validate_nickname(nickname)
@@ -180,7 +182,14 @@ def signup(
         raise AuthError("인증코드가 맞지 않아요.", "invalid_code", 400)
 
     db.delete_verification(email)
-    user = db.create_user(email, nickname, hash_password(password), USER_TYPE_MEMBER)
+    normalized_source = normalize_signup_source(signup_source)
+    user = db.create_user(
+        email,
+        nickname,
+        hash_password(password),
+        USER_TYPE_MEMBER,
+        signup_source=normalized_source,
+    )
     if after_create:
         after_create(user)
     return user

@@ -281,6 +281,10 @@
     </dialog>
 
     <audio id="player" preload="metadata"></audio>
+    <script type="module">
+      import { captureSignupSourceFromUrl } from "./signup-source.js";
+      captureSignupSourceFromUrl();
+    </script>
     <script src="app.js" type="module"></script>
   </body>
 </html>

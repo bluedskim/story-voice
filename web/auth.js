@@ -1,4 +1,5 @@
 import { closeModal, initAlertModal, openModal } from "./modal.js";
+import { clearStoredSignupSource, getStoredSignupSource } from "./signup-source.js";
 
 /** @typedef {{ nickname: string, canWrite: boolean }} AuthUser */
 
@@ -114,13 +115,17 @@ export async function sendVerificationCode(loginId) {
 }
 
 export async function signup(payload) {
+  const body = { ...payload };
+  const signupSource = getStoredSignupSource();
+  if (signupSource) body.signupSource = signupSource;
   const res = await apiFetch("/api/users/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "회원가입에 실패했어요.");
+  clearStoredSignupSource();
   return data;
 }
 

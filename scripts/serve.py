@@ -327,9 +327,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             or base_route.startswith("/app.js")
             or base_route.startswith("/auth.js")
             or base_route.startswith("/modal.js")
+            or base_route.startswith("/signup-source.js")
         ):
             base = base_route.split("?", 1)[0].lstrip("/")
-            if base in {"styles.css", "app.js", "auth.js", "modal.js"}:
+            if base in {"styles.css", "app.js", "auth.js", "modal.js", "signup-source.js"}:
                 ctype = (
                     "text/css; charset=utf-8"
                     if base.endswith(".css")
@@ -379,6 +380,9 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
                 return
             try:
+                raw_source = body.get("signupSource")
+                if raw_source is None:
+                    raw_source = body.get("signup_source")
                 user = signup(
                     self.app.auth_db,
                     (body.get("loginId") or body.get("email") or "").strip(),
@@ -387,6 +391,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                     (body.get("verificationCode") or "").strip(),
                     ip,
                     after_create=lambda _u: self._schedule_default_narrations(),
+                    signup_source=raw_source,
                 )
                 send_json(self, HTTPStatus.CREATED, {"user": user_public(user)})
             except AuthError as exc:
