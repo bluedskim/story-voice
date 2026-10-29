@@ -141,38 +141,42 @@ def test_chunk_lead_cleanup_removes_pre_speech_click() -> None:
     import numpy as np
     import wave
 
+    os.environ["STORY_VOICE_CHUNK_LEAD_STRIP"] = "1"
     sr = 24000
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "clicky.wav"
-        n_lead = int(0.02 * sr)
-        n_click = int(0.025 * sr)
-        n_gap = int(0.04 * sr)
-        n_speech = int(0.25 * sr)
-        total = n_lead + n_click + n_gap + n_speech
-        sig = np.zeros(total, dtype=np.float32)
-        off = n_lead
-        sig[off : off + n_click] = 0.45 * np.hanning(n_click)
-        off += n_click + n_gap
-        t = np.arange(n_speech) / sr
-        sig[off:] = 0.2 * np.sin(2 * np.pi * 440 * t)
-        with wave.open(str(src), "w") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(sr)
-            w.writeframes((sig * 32767).astype(np.int16).tobytes())
-        click_region = slice(n_lead, n_lead + n_click + n_gap)
-        before = float(np.max(np.abs(sig[click_region])))
-        apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
-        samples = load_mono_float_samples(src)
-        after = float(np.max(np.abs(samples[click_region])))
-        speech_peak = float(np.max(np.abs(samples[n_lead + n_click + n_gap :])))
-        assert before > 0.2
-        assert after < before * 0.08
-        assert speech_peak > 0.05
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "clicky.wav"
+            n_lead = int(0.02 * sr)
+            n_click = int(0.025 * sr)
+            n_gap = int(0.04 * sr)
+            n_speech = int(0.25 * sr)
+            total = n_lead + n_click + n_gap + n_speech
+            sig = np.zeros(total, dtype=np.float32)
+            off = n_lead
+            sig[off : off + n_click] = 0.45 * np.hanning(n_click)
+            off += n_click + n_gap
+            t = np.arange(n_speech) / sr
+            sig[off:] = 0.2 * np.sin(2 * np.pi * 440 * t)
+            with wave.open(str(src), "w") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(sr)
+                w.writeframes((sig * 32767).astype(np.int16).tobytes())
+            click_region = slice(n_lead, n_lead + n_click + n_gap)
+            before = float(np.max(np.abs(sig[click_region])))
+            apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
+            samples = load_mono_float_samples(src)
+            after = float(np.max(np.abs(samples[click_region])))
+            speech_peak = float(np.max(np.abs(samples[n_lead + n_click + n_gap :])))
+            assert before > 0.2
+            assert after < before * 0.08
+            assert speech_peak > 0.05
+    finally:
+        os.environ.pop("STORY_VOICE_CHUNK_LEAD_STRIP", None)
 
 
 def test_chunk_lead_preserves_soft_onset() -> None:
-    """Regression: lead-strip must not zero quiet attack / first syllable before sustained hold."""
+    """Regression: lead fade must not zero quiet attack / first syllable before sustained hold."""
     import numpy as np
     import wave
 
@@ -185,6 +189,7 @@ def test_chunk_lead_preserves_soft_onset() -> None:
         sig = (env * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
         early = slice(0, int(0.06 * sr))
         before_peak = float(np.max(np.abs(sig[early])))
+        before_rms = float(np.sqrt(np.mean(sig[early] ** 2)))
         with wave.open(str(src), "w") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
@@ -193,12 +198,43 @@ def test_chunk_lead_preserves_soft_onset() -> None:
         apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
         out = load_mono_float_samples(src)
         after_peak = float(np.max(np.abs(out[early])))
+        after_rms = float(np.sqrt(np.mean(out[early] ** 2)))
         assert before_peak > 0.01
-        assert after_peak >= before_peak * 0.45
+        assert after_peak >= before_peak * 0.75
+        assert after_rms >= before_rms * 0.65
+
+
+def test_chunk_lead_preserves_plosive_burst() -> None:
+    """Regression: plosive-like burst + brief gap + vowel must not be lead-stripped or faded out."""
+    import numpy as np
+    import wave
+
+    sr = 24000
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "plosive.wav"
+        total = int(0.3 * sr)
+        sig = np.zeros(total, dtype=np.float32)
+        imp_s = int(0.08 * sr)
+        imp_e = imp_s + int(0.012 * sr)
+        gap_e = imp_e + int(0.022 * sr)
+        sig[imp_s:imp_e] = 0.5 * np.hanning(imp_e - imp_s)
+        t = np.arange(total - gap_e, dtype=np.float64) / sr
+        sig[gap_e:] = (0.25 * np.sin(2 * np.pi * 300 * t)).astype(np.float32)
+        burst_before = float(np.max(np.abs(sig[imp_s:imp_e])))
+        with wave.open(str(src), "w") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes((sig * 32767).astype(np.int16).tobytes())
+        apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
+        out = load_mono_float_samples(src)
+        burst_after = float(np.max(np.abs(out[imp_s:imp_e])))
+        assert burst_before > 0.35
+        assert burst_after >= burst_before * 0.85
 
 
 def test_chunk_lead_fade_aligns_with_speech_onset() -> None:
-    """Regression: fade at t=0 only affects TTS padding; speech attack stays abrupt."""
+    """Regression: padding is ducked but sustained speech attack has no hard step from silence."""
     import numpy as np
     import wave
 
@@ -220,12 +256,21 @@ def test_chunk_lead_fade_aligns_with_speech_onset() -> None:
             w.writeframes((sig * 32767).astype(np.int16).tobytes())
         onset = speech_onset_sample(sig, sr)
         assert onset >= n_lead - sr // 50  # ~120 ms lead
-        raw_attack = float(np.max(np.abs(sig[onset : onset + int(0.008 * sr)])))
+        pad_peak = float(np.max(np.abs(sig[:n_lead])))
+        early_pad = slice(0, int(0.04 * sr))
         apply_chunk_lead_fade_in(src, sr, fade_sec=0.025)
         out = load_mono_float_samples(src)
-        soft_attack = float(np.max(np.abs(out[onset : onset + int(0.008 * sr)])))
+        pad_early_after = float(np.max(np.abs(out[early_pad])))
+        assert pad_peak > 0.003
+        assert pad_early_after < float(np.max(np.abs(sig[early_pad]))) * 0.35
+        attack = slice(onset, onset + int(0.012 * sr))
+        raw_attack = float(np.max(np.abs(sig[attack])))
+        out_attack = float(np.max(np.abs(out[attack])))
         assert raw_attack > 0.15
-        assert soft_attack < raw_attack * 0.35
+        assert out_attack >= raw_attack * 0.85
+        # No sample at speech start should sit far below the local attack (hard zero step).
+        step = float(np.max(np.abs(out[onset : onset + int(0.004 * sr)])))
+        assert step >= raw_attack * 0.5
 
 
 def test_chunk_tail_pad_extends_duration() -> None:
@@ -508,6 +553,7 @@ def main() -> int:
     test_tail_has_limiter_without_fade_out()
     test_chunk_lead_cleanup_removes_pre_speech_click()
     test_chunk_lead_preserves_soft_onset()
+    test_chunk_lead_preserves_plosive_burst()
     test_chunk_lead_fade_aligns_with_speech_onset()
     test_chunk_tail_pad_extends_duration()
     test_tail_guard_extra_on_tight_tts_end()

@@ -138,11 +138,16 @@ def wav_rms_mean_db(path: Path) -> float:
 def build_dialogue_middle_chain(
     sample_rate: int,
     fade_st_sec: float = 0.0,
+    fade_d_sec: float | None = None,
+    *,
+    lead_fade: bool = True,
 ) -> tuple[str, PitchMethod]:
     """Fade-in plus optional pitch, gain, and EQ (no fade-out, no loudness match)."""
-    fade = dialogue_fade_sec()
-    st = max(0.0, fade_st_sec)
-    parts: list[str] = [f"afade=t=in:st={st:.6f}:d={fade:.4f}"]
+    parts: list[str] = []
+    if lead_fade:
+        fade = fade_d_sec if fade_d_sec is not None else dialogue_fade_sec()
+        st = max(0.0, fade_st_sec)
+        parts.append(f"afade=t=in:st={st:.6f}:d={fade:.4f}")
     pitch_method: PitchMethod = "none"
     pitch_st = dialogue_pitch_semitones()
     if abs(pitch_st) > 1e-9:
@@ -228,15 +233,28 @@ def compute_chunk_tail_pad_sec(input_wav: Path, sample_rate: int = 24000) -> flo
     return pad
 
 
-def speech_onset_sample(
+def _onset_amplitude_threshold(peak: float, rel_thresh: float = 0.12, abs_floor: float = 0.008) -> float:
+    return max(abs_floor, peak * rel_thresh)
+
+
+def _rms_onset_frame(samples: "np.ndarray", start: int, end: int) -> float:
+    import numpy as np
+
+    chunk = samples[start:end]
+    if chunk.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(chunk**2)))
+
+
+def _sustained_speech_onset_sample(
     samples: "np.ndarray",
     sample_rate: int,
-    frame_ms: float = 10.0,
-    hold_ms: float = 70.0,
-    rel_thresh: float = 0.12,
-    abs_floor: float = 0.008,
+    frame_ms: float,
+    hold_ms: float,
+    rel_thresh: float,
+    abs_floor: float,
 ) -> int:
-    """First sample index of sustained speech (skips isolated leading glitches)."""
+    """First sample index where RMS stays above threshold for ``hold_ms`` (sustained speech)."""
     import numpy as np
 
     if samples.size == 0:
@@ -246,20 +264,106 @@ def speech_onset_sample(
     peak = float(np.max(np.abs(samples)))
     if peak < 1e-8:
         return 0
-    thresh = max(abs_floor, peak * rel_thresh)
+    thresh = _onset_amplitude_threshold(peak, rel_thresh, abs_floor)
     n_frames = (samples.size + frame - 1) // frame
     consec = 0
     for fi in range(n_frames):
         start = fi * frame
         end = min(samples.size, start + frame)
-        rms = float(np.sqrt(np.mean(samples[start:end] ** 2)))
-        if rms >= thresh:
+        if _rms_onset_frame(samples, start, end) >= thresh:
             consec += 1
             if consec >= hold_frames:
                 return max(0, (fi - hold_frames + 1) * frame)
         else:
             consec = 0
     return 0
+
+
+def speech_onset_sample(
+    samples: "np.ndarray",
+    sample_rate: int,
+    frame_ms: float = 10.0,
+    hold_ms: float = 70.0,
+    rel_thresh: float = 0.12,
+    abs_floor: float = 0.008,
+) -> int:
+    """First sample index of sustained speech (skips isolated leading glitches)."""
+    return _sustained_speech_onset_sample(
+        samples, sample_rate, frame_ms, hold_ms, rel_thresh, abs_floor
+    )
+
+
+def speech_energy_onset_sample(
+    samples: "np.ndarray",
+    sample_rate: int,
+    frame_ms: float = 10.0,
+    hold_ms: float = 20.0,
+    rel_thresh: float = 0.04,
+    abs_floor: float = 0.008,
+) -> int:
+    """First sample index of any sustained energy (lower threshold than ``speech_onset_sample``)."""
+    return _sustained_speech_onset_sample(
+        samples, sample_rate, frame_ms, hold_ms, rel_thresh, abs_floor
+    )
+
+
+def _leading_quiet_prefix_samples(samples: "np.ndarray", end: int, thresh: float) -> int:
+    """Length of [0, end) where every sample is below ``thresh`` until the first exceedance."""
+    if end <= 0:
+        return 0
+    i = 0
+    while i < end and abs(float(samples[i])) < thresh:
+        i += 1
+    return i
+
+
+def chunk_lead_fade_start_sample(samples: "np.ndarray", sample_rate: int) -> int:
+    """Sample index for ffmpeg ``afade=t=in:st=`` — fades padding/clicks, not syllable attacks.
+
+    ffmpeg silences everything before ``st``; starting the fade at sustained-speech onset
+    (PR #34) zeroed soft consonants and plosives below the 12% hold threshold. When a long
+    quiet/padding run precedes sustained speech, fade from t=0 so only padding is ducked.
+    """
+    import numpy as np
+
+    if samples.size == 0:
+        return 0
+    peak = float(np.max(np.abs(samples)))
+    if peak < 1e-8:
+        return 0
+    sustained = speech_onset_sample(samples, sample_rate)
+    thresh = _onset_amplitude_threshold(peak)
+    energy = speech_energy_onset_sample(samples, sample_rate)
+    min_pad = max(1, int(sample_rate * 0.045))
+    align_slack = max(1, int(sample_rate * 0.025))
+    if sustained > 0 and energy > 0 and energy >= sustained - align_slack:
+        quiet_to_energy = _leading_quiet_prefix_samples(samples, energy, thresh)
+        if quiet_to_energy >= min_pad:
+            return 0
+    if energy <= 0:
+        return 0
+    return min(energy, sustained if sustained > 0 else energy)
+
+
+def chunk_lead_fade_st_d(
+    samples: "np.ndarray",
+    sample_rate: int,
+    fade_sec: float,
+) -> tuple[float, float] | None:
+    """Return ffmpeg afade ``st`` and ``d``, or ``None`` when fade would duck real attacks."""
+    import numpy as np
+
+    fade_start = chunk_lead_fade_start_sample(samples, sample_rate)
+    sustained = speech_onset_sample(samples, sample_rate)
+    energy = speech_energy_onset_sample(samples, sample_rate)
+    align_slack = max(1, int(sample_rate * 0.025))
+    if energy > 0 and sustained > energy + align_slack:
+        return None
+    st = fade_start / float(sample_rate)
+    d = fade_sec
+    if fade_start == 0 and fade_sec > 1e-6 and sustained > 0:
+        d = max(fade_sec, sustained / float(sample_rate))
+    return st, d
 
 
 def _write_mono_wav(path: Path, samples: "np.ndarray", sample_rate: int) -> None:
@@ -278,12 +382,17 @@ def leading_glitch_mute_range(
     samples: "np.ndarray",
     onset: int,
     sample_rate: int,
-    max_impulse_ms: float = 30.0,
-    min_gap_ms: float = 15.0,
+    max_impulse_ms: float = 28.0,
+    min_gap_ms: float = 18.0,
+    max_lead_ms: float = 35.0,
     rel_thresh: float = 0.12,
     abs_floor: float = 0.008,
 ) -> tuple[int, int]:
-    """Sample range [start, end) to zero: short impulse + gap before sustained speech at ``onset``."""
+    """Sample range [start, end) to zero: TTS mouth-click in leading padding only.
+
+    Plosives (short burst + brief gap + vowel) match the old shape but sit later in the
+    chunk; restrict to impulses starting within ``max_lead_ms`` and require a loud, narrow spike.
+    """
     if onset <= 0:
         return (0, 0)
     import numpy as np
@@ -291,9 +400,10 @@ def leading_glitch_mute_range(
     peak = float(np.max(np.abs(samples)))
     if peak < 1e-8:
         return (0, 0)
-    thresh = max(abs_floor, peak * rel_thresh)
+    thresh = _onset_amplitude_threshold(peak, rel_thresh, abs_floor)
     max_impulse = max(1, int(sample_rate * max_impulse_ms / 1000.0))
     min_gap = max(1, int(sample_rate * min_gap_ms / 1000.0))
+    max_lead = max(1, int(sample_rate * max_lead_ms / 1000.0))
 
     gap_end = onset
     i = onset - 1
@@ -310,6 +420,14 @@ def leading_glitch_mute_range(
     imp_start = j + 1
     imp_len = imp_end - imp_start
     if imp_len <= 0 or imp_len > max_impulse:
+        return (0, 0)
+    if imp_start > max_lead:
+        return (0, 0)
+
+    impulse = samples[imp_start:imp_end]
+    imp_peak = float(np.max(np.abs(impulse)))
+    imp_rms = float(np.sqrt(np.mean(impulse**2)))
+    if imp_peak < max(abs_floor * 4.0, peak * 0.35):
         return (0, 0)
 
     k = imp_start - 1
@@ -336,24 +454,27 @@ def strip_leading_glitches_before_speech(input_wav: Path, sample_rate: int = 240
 
 
 def apply_chunk_lead_fade_in(input_wav: Path, sample_rate: int = 24000, fade_sec: float | None = None) -> None:
-    """Strip isolated leading clicks then fade-in at speech onset before hard concat."""
+    """Strip isolated leading clicks then fade-in before hard concat (padding only when possible)."""
     samples = load_mono_float_samples(input_wav)
     onset = speech_onset_sample(samples, sample_rate)
-    # TTS often leaves 80–200 ms of quiet padding before speech; fading only at t=0
-    # ramps the padding, not the syllable attack (audible "탁" at each sentence start).
-    fade_start = onset
+    fade_start = chunk_lead_fade_start_sample(samples, sample_rate)
     if chunk_lead_strip_enabled():
         start, end = leading_glitch_mute_range(samples, onset, sample_rate)
         if end > start:
             cleared = samples.copy()
             cleared[start:end] = 0.0
             _write_mono_wav(input_wav, cleared, sample_rate)
+            samples = cleared
+            fade_start = chunk_lead_fade_start_sample(samples, sample_rate)
     fade = fade_sec if fade_sec is not None else chunk_lead_fade_sec()
     if fade <= 1e-6:
         return
-    st = fade_start / float(sample_rate)
+    fade_params = chunk_lead_fade_st_d(samples, sample_rate, fade)
+    if fade_params is None:
+        return
+    st, d = fade_params
     faded = input_wav.with_suffix(".leadfade.wav")
-    ffmpeg_run_af(input_wav, faded, f"afade=t=in:st={st:.6f}:d={fade:.4f}", sample_rate)
+    ffmpeg_run_af(input_wav, faded, f"afade=t=in:st={st:.6f}:d={d:.4f}", sample_rate)
     faded.replace(input_wav)
 
 
@@ -432,9 +553,17 @@ def apply_dialogue_style(input_wav: Path, output_wav: Path, sample_rate: int = 2
         return "none"
 
     mean_in = volumedetect_mean_db(input_wav)
-    onset_samples = speech_onset_sample(load_mono_float_samples(input_wav), sample_rate)
-    fade_st_sec = onset_samples / float(sample_rate)
-    middle_af, pitch_method = build_dialogue_middle_chain(sample_rate, fade_st_sec=fade_st_sec)
+    samples_in = load_mono_float_samples(input_wav)
+    fade_params = chunk_lead_fade_st_d(samples_in, sample_rate, dialogue_fade_sec())
+    if fade_params is None:
+        middle_af, pitch_method = build_dialogue_middle_chain(
+            sample_rate, lead_fade=False
+        )
+    else:
+        fade_st_sec, fade_d_sec = fade_params
+        middle_af, pitch_method = build_dialogue_middle_chain(
+            sample_rate, fade_st_sec=fade_st_sec, fade_d_sec=fade_d_sec
+        )
 
     with tempfile.TemporaryDirectory(prefix="dialogue_af_") as tmp:
         mid = Path(tmp) / "mid.wav"
