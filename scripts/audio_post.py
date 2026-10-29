@@ -457,7 +457,6 @@ def apply_chunk_lead_fade_in(input_wav: Path, sample_rate: int = 24000, fade_sec
     """Strip isolated leading clicks then fade-in before hard concat (padding only when possible)."""
     samples = load_mono_float_samples(input_wav)
     onset = speech_onset_sample(samples, sample_rate)
-    fade_start = chunk_lead_fade_start_sample(samples, sample_rate)
     if chunk_lead_strip_enabled():
         start, end = leading_glitch_mute_range(samples, onset, sample_rate)
         if end > start:
@@ -465,7 +464,6 @@ def apply_chunk_lead_fade_in(input_wav: Path, sample_rate: int = 24000, fade_sec
             cleared[start:end] = 0.0
             _write_mono_wav(input_wav, cleared, sample_rate)
             samples = cleared
-            fade_start = chunk_lead_fade_start_sample(samples, sample_rate)
     fade = fade_sec if fade_sec is not None else chunk_lead_fade_sec()
     if fade <= 1e-6:
         return
