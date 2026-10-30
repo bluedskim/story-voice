@@ -477,7 +477,7 @@ audio.addEventListener("loadedmetadata", syncNowPlayingUi);
 audio.addEventListener("ended", () => {
   const card = document.querySelector(`.story-card[data-id="${activeId}"]`);
   if (card) {
-    setStatus(card, "끝났어요. 좋은 꿈 꾸세요.");
+    setStatus(card, "끝났어요.");
     card.classList.remove("is-active");
   }
   syncNowPlayingUi();
