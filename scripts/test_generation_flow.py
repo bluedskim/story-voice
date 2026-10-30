@@ -141,36 +141,10 @@ def test_generation_asr_enqueue_flags() -> None:
             os.environ["STORY_VOICE_ASR_VERIFY"] = old
 
 
-def test_member_one_active_job_guard() -> None:
-    import threading
-
-    from default_narration import SYSTEM_USER_ID
-    from generation_backends import FakeGenerationBackend
-    import generation_service as gsmod
-    from generation_service import GenerationService, MemberBusyError
+def test_generate_all_removed() -> None:
+    from generation_service import GenerationService
 
     assert not hasattr(GenerationService, "enqueue_all"), "bulk generate-all must stay removed"
-    svc = GenerationService(backend=FakeGenerationBackend())
-    gate = threading.Event()
-    # Hold the worker without generating anything (no files touched).
-    svc._process_job = lambda job: gate.wait(10)
-    try:
-        ids = sorted(svc.catalog_ids())
-        assert len(ids) >= 2
-        first = svc.enqueue_story(ids[0], 42, asr_verify_request=False)
-        assert first.created
-        again = svc.enqueue_story(ids[0], 42, asr_verify_request=False)
-        assert again.created is False and again.job.job_id == first.job.job_id
-        try:
-            svc.enqueue_story(ids[1], 42, asr_verify_request=False)
-            raise AssertionError("second story for same member should be rejected")
-        except MemberBusyError as exc:
-            assert str(exc) == gsmod.BUSY_MEMBER_MESSAGE
-        other = svc.enqueue_story(ids[1], 43, asr_verify_request=False)
-        assert other.created
-        assert SYSTEM_USER_ID != 42
-    finally:
-        gate.set()
 
 
 def test_download_filename_helpers() -> None:
@@ -194,7 +168,7 @@ def test_download_filename_helpers() -> None:
 def main() -> int:
     test_download_filename_helpers()
     test_generation_asr_enqueue_flags()
-    test_member_one_active_job_guard()
+    test_generate_all_removed()
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)

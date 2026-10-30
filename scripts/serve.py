@@ -24,13 +24,7 @@ from download_filenames import (
     download_basename,
 )
 from audio_quality_config import parse_asr_verify_body
-from generation_service import (
-    EnqueueResult,
-    GenerationService,
-    JobState,
-    MemberBusyError,
-    StoryNotFoundError,
-)
+from generation_service import EnqueueResult, GenerationService, JobState, StoryNotFoundError
 from auth_csrf import CSRF_COOKIE, CSRF_HEADER, new_csrf_token, parse_cookies, validate_csrf
 from auth_db import AuthDatabase
 from auth_config import ensure_session_secret
@@ -516,8 +510,6 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 self._send_enqueue_result(result)
             except StoryNotFoundError:
                 send_json(self, HTTPStatus.NOT_FOUND, {"error": "이야기를 찾을 수 없어요."})
-            except MemberBusyError as exc:
-                send_json(self, HTTPStatus.CONFLICT, {"error": str(exc), "code": "member_generation_busy"})
             except RuntimeError as exc:
                 send_json(self, HTTPStatus.CONFLICT, {"error": str(exc)})
             return
