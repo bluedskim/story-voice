@@ -56,8 +56,14 @@
         <div class="panel-actions">
           <label class="regen-option" id="regen-asr-wrap" hidden>
             <input type="checkbox" id="regen-asr-verify" />
-            발음 검증 (ASR)
+            발음 확인 후 다시 만들기
           </label>
+          <span class="asr-help" id="asr-help" hidden>
+            <button type="button" class="asr-help-btn" id="asr-help-btn" aria-expanded="false" aria-controls="asr-help-tip" aria-describedby="asr-help-tip" aria-label="‘발음 확인 후 다시 만들기’ 설명 보기">?</button>
+          </span>
+          <div class="asr-help-tip" id="asr-help-tip" role="tooltip" hidden>
+            내 목소리로 이야기를 만들 때, 만든 낭독을 음성 인식으로 몇 문장씩 다시 들어 봐요. 대본과 많이 다르게 읽힌 부분은 최대 2번까지 다시 만들어 가장 정확한 것을 써요. 대신 만드는 시간이 더 걸려요.
+          </div>
         </div>
         <main id="story-list" class="story-list" aria-live="polite"></main>
       </section>
