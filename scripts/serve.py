@@ -80,6 +80,8 @@ STATIC_FILES = {
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
     "/auth.js": ("auth.js", "application/javascript; charset=utf-8"),
     "/modal.js": ("modal.js", "application/javascript; charset=utf-8"),
+    "/signup-source.js": ("signup-source.js", "application/javascript; charset=utf-8"),
+    "/playback.js": ("playback.js", "application/javascript; charset=utf-8"),
     "/catalog.json": ("catalog.json", "application/json; charset=utf-8"),
     "/favicon.ico": ("favicon.ico", "image/x-icon"),
     "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json; charset=utf-8"),
@@ -328,9 +330,10 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             or base_route.startswith("/auth.js")
             or base_route.startswith("/modal.js")
             or base_route.startswith("/signup-source.js")
+            or base_route.startswith("/playback.js")
         ):
             base = base_route.split("?", 1)[0].lstrip("/")
-            if base in {"styles.css", "app.js", "auth.js", "modal.js", "signup-source.js"}:
+            if base in {"styles.css", "app.js", "auth.js", "modal.js", "signup-source.js", "playback.js"}:
                 ctype = (
                     "text/css; charset=utf-8"
                     if base.endswith(".css")
