@@ -994,8 +994,7 @@ body {
   font-weight: 500;
 }
 
-body.is-app-busy .regen-btn,
-body.is-app-busy #regen-all {
+body.is-app-busy .regen-btn {
   opacity: 0.55;
   pointer-events: none;
 }

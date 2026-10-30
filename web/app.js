@@ -17,7 +17,6 @@ const genStatusEl = document.getElementById("gen-status");
 const genStatusTextEl = document.getElementById("gen-status-text");
 const genProgressEl = document.getElementById("gen-progress");
 const genProgressBarEl = document.getElementById("gen-progress-bar");
-const regenAllBtn = document.getElementById("regen-all");
 const regenAsrVerifyEl = document.getElementById("regen-asr-verify");
 const regenAsrWrapEl = document.getElementById("regen-asr-wrap");
 
@@ -214,7 +213,6 @@ function updateWriteGates() {
   if (voiceAuthGateEl) {
     voiceAuthGateEl.hidden = allowed;
   }
-  regenAllBtn.disabled = generationBusy || (allowed && !hasPersonalVoice);
   if (regenAsrWrapEl) regenAsrWrapEl.hidden = !allowed;
   if (regenAsrVerifyEl) regenAsrVerifyEl.disabled = generationBusy || !allowed;
   if (!allowed) {
@@ -537,22 +535,6 @@ async function enqueueStory(id) {
     return;
   }
   showGenStatus("이야기를 만드는 중…");
-  startPolling();
-}
-
-async function enqueueAll() {
-  if (warnLoginRequired()) return;
-  const res = await apiFetch("/api/generation/all", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: generationRequestBody(),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    showGenerationBlockingAlert(data.error || "요청하지 못했어요.");
-    return;
-  }
-  showGenStatus("전체 이야기를 만드는 중…");
   startPolling();
 }
 
@@ -936,7 +918,6 @@ stopBtn.addEventListener("click", stopRecording);
 fileInput.addEventListener("change", () => onFileSelected(fileInput.files?.[0]));
 prepareVoiceBtn.addEventListener("click", prepareVoice);
 saveVoiceBtn.addEventListener("click", saveVoice);
-regenAllBtn.addEventListener("click", enqueueAll);
 
 setupTabs();
 initAuthUi();

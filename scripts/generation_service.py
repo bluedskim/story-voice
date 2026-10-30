@@ -28,6 +28,12 @@ MANIFEST_PATH = ROOT / "web" / "catalog.json"
 
 MAX_QUEUE_LEN = 2  # pending jobs besides the running one
 
+BUSY_MEMBER_MESSAGE = "이미 만들고 있는 이야기가 있어요. 끝난 뒤에 다시 시도해 주세요."
+
+
+class MemberBusyError(RuntimeError):
+    """A member already has a queued/running generation job (one at a time)."""
+
 
 class StoryNotFoundError(Exception):
     def __init__(self, story_id: str) -> None:
@@ -87,6 +93,8 @@ class GenerationService:
         self._jobs: dict[str, GenerationJob] = {}
         self._order: list[str] = []
         self._lock = threading.Lock()
+        # Serializes check-then-enqueue so a member can't race two jobs in.
+        self._enqueue_lock = threading.Lock()
         self._worker = threading.Thread(target=self._run_worker, name="generation-worker", daemon=True)
         self._worker.start()
 
@@ -140,18 +148,22 @@ class GenerationService:
     ) -> EnqueueResult:
         if story_id not in self.catalog_ids():
             raise StoryNotFoundError(story_id)
-        existing = self._find_active_job_for_story(user_id, story_id)
-        if existing:
-            return EnqueueResult(job=existing, created=False)
-        return EnqueueResult(
-            job=self._enqueue(
-                user_id,
-                [story_id],
-                is_admin=is_admin,
-                asr_verify_request=asr_verify_request,
-            ),
-            created=True,
-        )
+        with self._enqueue_lock:
+            existing = self._find_active_job_for_story(user_id, story_id)
+            if existing:
+                return EnqueueResult(job=existing, created=False)
+            # One queued/running job per member so nobody can monopolize the worker.
+            if user_id != SYSTEM_USER_ID and self._find_any_active_job(user_id):
+                raise MemberBusyError(BUSY_MEMBER_MESSAGE)
+            return EnqueueResult(
+                job=self._enqueue(
+                    user_id,
+                    [story_id],
+                    is_admin=is_admin,
+                    asr_verify_request=asr_verify_request,
+                ),
+                created=True,
+            )
 
     def enqueue_missing_default_stories(self) -> EnqueueResult | None:
         """Generate shared default audio for any catalog story that lacks it."""
@@ -167,32 +179,6 @@ class GenerationService:
             return None
         return EnqueueResult(
             job=self._enqueue(SYSTEM_USER_ID, ids, is_admin=False, asr_verify_request=False),
-            created=True,
-        )
-
-    def enqueue_all(
-        self,
-        user_id: int,
-        *,
-        is_admin: bool = False,
-        asr_verify_request: bool | None = None,
-    ) -> EnqueueResult:
-        if user_id == SYSTEM_USER_ID:
-            raise ValueError("invalid user")
-        active = self._active_story_ids(user_id)
-        ids = [s.id for s in list_stories() if s.id not in active]
-        if not ids:
-            existing = self._find_any_active_job(user_id)
-            if existing:
-                return EnqueueResult(job=existing, created=False)
-            raise RuntimeError("생성할 이야기가 없어요.")
-        return EnqueueResult(
-            job=self._enqueue(
-                user_id,
-                ids,
-                is_admin=is_admin,
-                asr_verify_request=asr_verify_request,
-            ),
             created=True,
         )
 

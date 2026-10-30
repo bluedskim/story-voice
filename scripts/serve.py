@@ -24,7 +24,13 @@ from download_filenames import (
     download_basename,
 )
 from audio_quality_config import parse_asr_verify_body
-from generation_service import EnqueueResult, GenerationService, JobState, StoryNotFoundError
+from generation_service import (
+    EnqueueResult,
+    GenerationService,
+    JobState,
+    MemberBusyError,
+    StoryNotFoundError,
+)
 from auth_csrf import CSRF_COOKIE, CSRF_HEADER, new_csrf_token, parse_cookies, validate_csrf
 from auth_db import AuthDatabase
 from auth_config import ensure_session_secret
@@ -510,39 +516,23 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 self._send_enqueue_result(result)
             except StoryNotFoundError:
                 send_json(self, HTTPStatus.NOT_FOUND, {"error": "이야기를 찾을 수 없어요."})
+            except MemberBusyError as exc:
+                send_json(self, HTTPStatus.CONFLICT, {"error": str(exc), "code": "member_generation_busy"})
             except RuntimeError as exc:
                 send_json(self, HTTPStatus.CONFLICT, {"error": str(exc)})
             return
 
         if route == "/api/generation/all":
-            if not gen_rate.allow(ip):
-                send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요."})
-                return
-            if not self._ensure_csrf():
-                return
-            user = self._require_logged_in()
-            if user is None:
-                return
-            if not self._require_personal_voice(user):
-                return
-            body = read_json_body(self)
-            if body is None:
-                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
-                return
-            try:
-                asr_flag = parse_asr_verify_body(body)
-            except ValueError:
-                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "asrVerify는 true 또는 false여야 해요."})
-                return
-            try:
-                result = self.app.generation.enqueue_all(
-                    user.id,
-                    is_admin=user_is_admin(user),
-                    asr_verify_request=asr_flag,
-                )
-                self._send_enqueue_result(result)
-            except RuntimeError as exc:
-                send_json(self, HTTPStatus.CONFLICT, {"error": str(exc)})
+            # Bulk "generate every story in my voice" was removed: it could hog the
+            # single generation worker. Members generate one story at a time.
+            send_json(
+                self,
+                HTTPStatus.GONE,
+                {
+                    "error": "전체 이야기 한꺼번에 만들기는 더 이상 지원하지 않아요. 이야기마다 ‘내 목소리로 만들기’를 사용해 주세요.",
+                    "code": "generate_all_removed",
+                },
+            )
             return
 
         self._send_error(HTTPStatus.NOT_FOUND)

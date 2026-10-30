@@ -172,9 +172,12 @@ def test_gating_and_csrf() -> None:
             assert data["user"]["canWrite"] is True
             assert "isAdmin" not in data["user"]
             kid.fetch_config()
-            status, data, _ = kid.post_json("/api/generation/all", {})
+            status, data, _ = kid.post_json("/api/generation/story/ui-joeun-hyeongje", {})
             assert status == 400
             assert data.get("code") == "need_personal_voice"
+            status, data, _ = kid.post_json("/api/generation/all", {})
+            assert status == 410
+            assert data.get("code") == "generate_all_removed"
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -250,7 +253,7 @@ def test_admin_role_follows_env_list() -> None:
             assert row is not None
             os.environ["STORY_VOICE_ADMIN_EMAILS"] = ""
             assert user_is_admin(row) is False
-            status, data, _ = s3.post_json("/api/generation/all", {})
+            status, data, _ = s3.post_json("/api/generation/story/ui-joeun-hyeongje", {})
             assert status == 400
             assert data.get("code") == "need_personal_voice"
         finally:
