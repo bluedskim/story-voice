@@ -61,8 +61,8 @@ const npPlayBtn = document.getElementById("np-play");
 
 const STORY_MOTIFS = {
   "ui-joeun-hyeongje": "🌾",
-  "san-gol-halmeoni-gage": "🏡",
-  "bambyeol-ui-norae": "⭐",
+  "geum-dokki-eun-dokki": "🪓",
+  "hokburi-yeonggam": "🎶",
 };
 
 let catalog = [];
