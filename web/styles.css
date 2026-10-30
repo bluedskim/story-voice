@@ -1242,3 +1242,20 @@ body.modal-open {
 .alert-dialog {
   width: min(100%, 340px);
 }
+
+.play-btn.is-loading,
+.play-btn.is-buffering,
+.np-play.is-loading,
+.np-play.is-buffering {
+  animation: play-btn-pulse 1s ease-in-out infinite;
+}
+
+@keyframes play-btn-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}

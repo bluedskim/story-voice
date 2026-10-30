@@ -8,6 +8,7 @@ import {
   notifyAuthChange,
 } from "./auth.js";
 import { showAlertModal } from "./modal.js";
+import { createBufferedStarter } from "./playback.js";
 
 const listEl = document.getElementById("story-list");
 const voiceAuthGateEl = document.getElementById("voice-auth-gate");
@@ -74,6 +75,7 @@ let pollTimer = null;
 let durationCache = {};
 let generationBusy = false;
 let seekDragging = false;
+let playLoading = false;
 let previewSeekDragging = false;
 let prepareVoiceBusy = false;
 
@@ -401,12 +403,31 @@ function syncNowPlayingUi() {
   if (!seekDragging && dur > 0) {
     npSeekEl.value = String(Math.round((audio.currentTime / dur) * 1000));
   }
-  npPlayBtn.textContent = playIcon(!audio.paused);
+  npPlayBtn.textContent = playLoading ? "…" : playIcon(!audio.paused);
+  npPlayBtn.classList.toggle("is-loading", playLoading);
   document.querySelectorAll(".play-btn").forEach((b) => {
     const card = b.closest(".story-card");
     if (!card) return;
     const isActive = card.dataset.id === activeId;
-    b.textContent = playIcon(isActive && !audio.paused);
+    const loading = isActive && playLoading;
+    b.textContent = loading ? "…" : playIcon(isActive && !audio.paused);
+    b.classList.toggle("is-loading", loading);
+  });
+}
+
+const playStarter = createBufferedStarter(audio);
+
+function setPlayLoading(on) {
+  playLoading = on;
+  const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
+  if (card && on) setStatus(card, "불러오는 중…");
+  syncNowPlayingUi();
+}
+
+function startActivePlayback(card) {
+  playStarter.start({ onLoading: setPlayLoading }).catch(() => {
+    setPlayLoading(false);
+    if (card) setStatus(card, "재생할 수 없어요");
   });
 }
 
@@ -414,7 +435,9 @@ function togglePlayback(story, card, btn) {
   const url = storyAudioUrl(story);
   if (!url) return;
 
-  if (activeId === story.id && !audio.paused) {
+  if (activeId === story.id && (!audio.paused || playLoading)) {
+    playStarter.cancel();
+    playLoading = false;
     audio.pause();
     card.classList.remove("is-active");
     setStatus(card, "일시정지");
@@ -434,12 +457,22 @@ function togglePlayback(story, card, btn) {
     audio.src = url;
   }
   showNowPlaying(story);
-  audio.play().catch(() => setStatus(card, "재생할 수 없어요"));
-  setStatus(card, "재생 중…");
+  startActivePlayback(card);
   syncNowPlayingUi();
 }
 
 audio.addEventListener("timeupdate", syncNowPlayingUi);
+audio.addEventListener("playing", () => {
+  if (audio.muted) return; // still priming while buffering
+  const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
+  if (card) setStatus(card, "재생 중…");
+  npPlayBtn.classList.remove("is-buffering");
+  syncNowPlayingUi();
+});
+audio.addEventListener("waiting", () => {
+  if (audio.muted) return;
+  npPlayBtn.classList.add("is-buffering");
+});
 audio.addEventListener("loadedmetadata", syncNowPlayingUi);
 audio.addEventListener("ended", () => {
   const card = document.querySelector(`.story-card[data-id="${activeId}"]`);
@@ -457,8 +490,13 @@ audio.addEventListener("pause", () => {
 
 npPlayBtn.addEventListener("click", () => {
   if (!activeStory) return;
-  if (audio.paused) {
-    audio.play();
+  const card = document.querySelector(`.story-card[data-id="${activeId}"]`);
+  if (playLoading) {
+    playStarter.cancel();
+    playLoading = false;
+    audio.pause();
+  } else if (audio.paused) {
+    startActivePlayback(card);
   } else {
     audio.pause();
   }
