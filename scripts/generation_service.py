@@ -170,32 +170,6 @@ class GenerationService:
             created=True,
         )
 
-    def enqueue_all(
-        self,
-        user_id: int,
-        *,
-        is_admin: bool = False,
-        asr_verify_request: bool | None = None,
-    ) -> EnqueueResult:
-        if user_id == SYSTEM_USER_ID:
-            raise ValueError("invalid user")
-        active = self._active_story_ids(user_id)
-        ids = [s.id for s in list_stories() if s.id not in active]
-        if not ids:
-            existing = self._find_any_active_job(user_id)
-            if existing:
-                return EnqueueResult(job=existing, created=False)
-            raise RuntimeError("생성할 이야기가 없어요.")
-        return EnqueueResult(
-            job=self._enqueue(
-                user_id,
-                ids,
-                is_admin=is_admin,
-                asr_verify_request=asr_verify_request,
-            ),
-            created=True,
-        )
-
     def _enqueue(
         self,
         user_id: int,

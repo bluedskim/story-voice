@@ -141,6 +141,12 @@ def test_generation_asr_enqueue_flags() -> None:
             os.environ["STORY_VOICE_ASR_VERIFY"] = old
 
 
+def test_generate_all_removed() -> None:
+    from generation_service import GenerationService
+
+    assert not hasattr(GenerationService, "enqueue_all"), "bulk generate-all must stay removed"
+
+
 def test_download_filename_helpers() -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
     from download_filenames import (
@@ -162,6 +168,7 @@ def test_download_filename_helpers() -> None:
 def main() -> int:
     test_download_filename_helpers()
     test_generation_asr_enqueue_flags()
+    test_generate_all_removed()
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
