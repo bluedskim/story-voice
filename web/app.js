@@ -20,6 +20,9 @@ const genProgressBarEl = document.getElementById("gen-progress-bar");
 const regenAllBtn = document.getElementById("regen-all");
 const regenAsrVerifyEl = document.getElementById("regen-asr-verify");
 const regenAsrWrapEl = document.getElementById("regen-asr-wrap");
+const asrHelpEl = document.getElementById("asr-help");
+const asrHelpBtn = document.getElementById("asr-help-btn");
+const asrHelpTipEl = document.getElementById("asr-help-tip");
 
 const recordScriptEl = document.getElementById("record-script");
 const transcriptEl = document.getElementById("transcript");
@@ -217,6 +220,8 @@ function updateWriteGates() {
   regenAllBtn.disabled = generationBusy || (allowed && !hasPersonalVoice);
   if (regenAsrWrapEl) regenAsrWrapEl.hidden = !allowed;
   if (regenAsrVerifyEl) regenAsrVerifyEl.disabled = generationBusy || !allowed;
+  if (asrHelpEl) asrHelpEl.hidden = !allowed;
+  if (!allowed) setAsrHelpOpen(false);
   if (!allowed) {
     recordBtn.disabled = true;
     prepareVoiceBtn.disabled = true;
@@ -938,6 +943,33 @@ prepareVoiceBtn.addEventListener("click", prepareVoice);
 saveVoiceBtn.addEventListener("click", saveVoice);
 regenAllBtn.addEventListener("click", enqueueAll);
 
+function setAsrHelpOpen(open) {
+  if (!asrHelpBtn || !asrHelpTipEl) return;
+  asrHelpTipEl.hidden = !open;
+  asrHelpBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function setupAsrHelp() {
+  if (!asrHelpBtn || !asrHelpTipEl) return;
+  regenAsrVerifyEl?.setAttribute("aria-describedby", "asr-help-tip");
+  asrHelpBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setAsrHelpOpen(asrHelpTipEl.hidden);
+  });
+  document.addEventListener("click", (event) => {
+    if (asrHelpTipEl.hidden) return;
+    if (asrHelpBtn.contains(event.target) || asrHelpTipEl.contains(event.target)) return;
+    setAsrHelpOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || asrHelpTipEl.hidden) return;
+    setAsrHelpOpen(false);
+    asrHelpBtn.focus();
+  });
+}
+
+setupAsrHelp();
 setupTabs();
 initAuthUi();
 if (location.hash === "#voice") {
