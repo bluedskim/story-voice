@@ -690,6 +690,8 @@ def encode_story_from_wav(story_wav: Path, out_path: Path, sample_rate: int) -> 
                 "aac",
                 "-b:a",
                 "128k",
+                "-movflags",
+                "+faststart",
                 str(out_path),
             ]
         )

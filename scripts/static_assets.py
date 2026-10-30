@@ -14,6 +14,7 @@ CACHE_BUST_ASSETS = (
     "auth.js",
     "modal.js",
     "signup-source.js",
+    "playback.js",
     "favicon.ico",
     "manifest.webmanifest",
     "icons/favicon.svg",
@@ -49,7 +50,7 @@ def inject_asset_versions(text: str, versions: dict[str, str]) -> str:
 
 
 def inject_module_imports(text: str, versions: dict[str, str]) -> str:
-    for rel in ("auth.js", "modal.js", "signup-source.js"):
+    for rel in ("auth.js", "modal.js", "signup-source.js", "playback.js"):
         ver = versions.get(rel)
         if not ver:
             continue
