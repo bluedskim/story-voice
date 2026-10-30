@@ -606,6 +606,28 @@ body {
   color: var(--muted);
 }
 
+.footer-links {
+  margin-top: 0.35rem;
+}
+
+.footer-link {
+  display: inline-block;
+  padding: 0.4rem 0.6rem;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  border-radius: var(--radius-sm);
+}
+
+.footer-link:hover {
+  color: var(--accent);
+}
+
+.footer-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
 .loading,
 .error {
   text-align: center;
