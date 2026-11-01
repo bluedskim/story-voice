@@ -20,7 +20,7 @@ from story_catalog import list_stories, load_story, write_manifest
 from default_narration import (
     SYSTEM_USER_ID,
     default_story_audio,
-    ensure_default_reference,
+    ensure_default_reference_for_story,
 )
 from user_storage import ensure_user_reference, user_audio_dir, user_story_audio
 
@@ -263,7 +263,6 @@ class GenerationService:
         is_admin = False
         try:
             if job.user_id == SYSTEM_USER_ID:
-                ref_wav, ref_txt = ensure_default_reference()
                 from default_narration import default_audio_dir
 
                 staging_dir = default_audio_dir() / ".staging"
@@ -274,7 +273,6 @@ class GenerationService:
                 db = AuthDatabase()
                 user = db.get_user_by_id(job.user_id)
                 is_admin = bool(user and user_is_admin(user))
-                ref_wav, ref_txt = ensure_user_reference(job.user_id, is_admin)
                 staging_dir = user_audio_dir(job.user_id) / ".staging"
 
             staging_dir.mkdir(parents=True, exist_ok=True)
@@ -289,6 +287,11 @@ class GenerationService:
                 job.current_story_id = story_id
                 job.chunk_index = 0
                 job.chunk_total = 0
+
+                if job.user_id == SYSTEM_USER_ID:
+                    ref_wav, ref_txt = ensure_default_reference_for_story(story_id)
+                else:
+                    ref_wav, ref_txt = ensure_user_reference(job.user_id, is_admin)
 
                 tmp_out = staging_dir / f"{story_id}.{job.job_id}.m4a"
                 if job.user_id == SYSTEM_USER_ID:

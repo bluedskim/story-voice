@@ -41,6 +41,7 @@ class FakeGenerationBackend(GenerationBackend):
             chunk_delay = float(os.environ.get("STORY_VOICE_FAKE_CHUNK_DELAY", "0.02"))
         self.chunk_delay = chunk_delay
         self.last_verify_asr: bool | None = None
+        self.last_ref_wav: Path | None = None
         self._ensure_fixture()
 
     def _ensure_fixture(self) -> None:
@@ -78,6 +79,7 @@ class FakeGenerationBackend(GenerationBackend):
         ref_txt: Path | None = None,
     ) -> None:
         self.last_verify_asr = verify_asr
+        self.last_ref_wav = ref_wav
         from audio_quality_config import DEFAULT_MAX_CHARS
         from story_segmentation import split_story_into_chunks
 

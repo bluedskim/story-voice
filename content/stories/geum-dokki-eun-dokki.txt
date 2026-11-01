@@ -2,6 +2,7 @@
 title: 금도끼 은도끼
 id: geum-dokki-eun-dokki
 order: 2
+defaultVoice: harry
 ---
 
 옛날 옛적, 깊은 산속 마을에 마음씨 착한 나무꾼이 살았어요.

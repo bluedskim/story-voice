@@ -15,16 +15,19 @@ from story_catalog import list_stories
 
 STORY_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 EXPECTED = [
-    ("ui-joeun-hyeongje", "의좋은 형제"),
-    ("geum-dokki-eun-dokki", "금도끼 은도끼"),
-    ("hokburi-yeonggam", "혹부리 영감"),
+    ("ui-joeun-hyeongje", "의좋은 형제", "dana"),
+    ("geum-dokki-eun-dokki", "금도끼 은도끼", "harry"),
+    ("hokburi-yeonggam", "혹부리 영감", "dana"),
+    ("haenim-dalnim", "해님 달님", "harry"),
+    ("heungbu-nolbu", "흥부와 놀부", "dana"),
 ]
 
 
 def test_catalog_ids_titles_and_order() -> None:
     stories = list_stories()
-    assert [(s.id, s.title) for s in stories] == EXPECTED
-    assert [s.order for s in stories] == [1, 2, 3]
+    assert [(s.id, s.title) for s in stories] == [(a, b) for a, b, _ in EXPECTED]
+    assert [s.default_voice for s in stories] == [v for _, _, v in EXPECTED]
+    assert [s.order for s in stories] == [1, 2, 3, 4, 5]
     for s in stories:
         assert STORY_ID_RE.match(s.id), s.id
         assert s.path.stem == s.id, (s.path, s.id)
