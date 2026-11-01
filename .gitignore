@@ -10,12 +10,6 @@ data/voice/*
 data/voice/default/*
 !data/voice/default/README.md
 !data/voice/default/default-narration-source.wav
-!data/voice/default/harry/
-data/voice/default/harry/*
-!data/voice/default/harry/default-narration-source.wav
-!data/voice/default/dana/
-data/voice/default/dana/*
-!data/voice/default/dana/default-narration-source.wav
 data/voice/history/
 data/recordings/
 recordings/
@@ -40,8 +34,6 @@ web/catalog.json
 *.wav
 !web/**/*.wav
 !data/voice/default/default-narration-source.wav
-!data/voice/default/harry/default-narration-source.wav
-!data/voice/default/dana/default-narration-source.wav
 
 # Python
 .venv/

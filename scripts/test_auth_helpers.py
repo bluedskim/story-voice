@@ -31,35 +31,58 @@ def ensure_default_narration_fixtures(
     root = Path(__file__).resolve().parents[1]
     record_script = (root / "content" / "record_script.txt").read_text(encoding="utf-8").strip()
 
-    voice_root = voice_dir or default_voice_root()
+    dana_root = voice_dir or default_voice_root()
     audio_dir = audio_dir or default_audio_dir()
-    for voice in ("harry", "dana"):
-        vdir = voice_root / voice
-        vdir.mkdir(parents=True, exist_ok=True)
-        ref_wav = vdir / "reference.wav"
-        ref_txt = vdir / "reference.txt"
-        if not ref_wav.is_file():
-            freq = 440 if voice == "harry" else 520
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-loglevel",
-                    "error",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    f"sine=frequency={freq}:duration=8",
-                    "-ar",
-                    "24000",
-                    "-ac",
-                    "1",
-                    str(ref_wav),
-                ],
-                check=True,
-            )
-        if not ref_txt.is_file() and record_script:
-            ref_txt.write_text(record_script + "\n", encoding="utf-8")
+    dana_root.mkdir(parents=True, exist_ok=True)
+    ref_wav = dana_root / "reference.wav"
+    ref_txt = dana_root / "reference.txt"
+    if not ref_wav.is_file():
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=520:duration=8",
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                str(ref_wav),
+            ],
+            check=True,
+        )
+    if not ref_txt.is_file() and record_script:
+        ref_txt.write_text(record_script + "\n", encoding="utf-8")
+
+    harry_dir = dana_root / "harry"
+    harry_dir.mkdir(parents=True, exist_ok=True)
+    harry_wav = harry_dir / "reference.wav"
+    harry_txt = harry_dir / "reference.txt"
+    if not harry_wav.is_file():
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=8",
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                str(harry_wav),
+            ],
+            check=True,
+        )
+    if not harry_txt.is_file() and record_script:
+        harry_txt.write_text(record_script + "\n", encoding="utf-8")
 
     audio_dir.mkdir(parents=True, exist_ok=True)
     if not FIXTURE_M4A.is_file():
