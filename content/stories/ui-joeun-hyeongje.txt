@@ -2,6 +2,7 @@
 title: 의좋은 형제
 id: ui-joeun-hyeongje
 order: 1
+defaultVoice: dana
 ---
 
 옛날 옛적, 작은 산골 마을에 사이좋은 형과 아우가 살았어요.

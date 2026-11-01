@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -19,14 +20,18 @@ from generation_backends import GenerationBackend, get_backend
 from story_catalog import list_stories, load_story, write_manifest
 from default_narration import (
     SYSTEM_USER_ID,
+    DefaultReferenceUnavailable,
+    can_generate_default_narration,
     default_story_audio,
-    ensure_default_reference,
+    ensure_default_reference_for_story,
 )
 from user_storage import ensure_user_reference, user_audio_dir, user_story_audio
 
 MANIFEST_PATH = ROOT / "web" / "catalog.json"
 
 MAX_QUEUE_LEN = 2  # pending jobs besides the running one
+
+log = logging.getLogger("story_voice.generation")
 
 
 class StoryNotFoundError(Exception):
@@ -155,7 +160,22 @@ class GenerationService:
 
     def enqueue_missing_default_stories(self) -> EnqueueResult | None:
         """Generate shared default audio for any catalog story that lacks it."""
-        missing = [s.id for s in list_stories() if not default_story_audio(s.id).is_file()]
+        missing = [
+            s.id
+            for s in list_stories()
+            if not default_story_audio(s.id).is_file() and can_generate_default_narration(s.id)
+        ]
+        skipped = [
+            s.id
+            for s in list_stories()
+            if not default_story_audio(s.id).is_file() and not can_generate_default_narration(s.id)
+        ]
+        for story_id in skipped:
+            log.warning(
+                "Skipping default narration enqueue for %s: Harry reference wav not found "
+                "(data/voice/default/harry/reference.wav or data/voice/harry/harry_script_reference.wav)",
+                story_id,
+            )
         if not missing:
             return None
         active = self._active_story_ids(SYSTEM_USER_ID)
@@ -263,7 +283,6 @@ class GenerationService:
         is_admin = False
         try:
             if job.user_id == SYSTEM_USER_ID:
-                ref_wav, ref_txt = ensure_default_reference()
                 from default_narration import default_audio_dir
 
                 staging_dir = default_audio_dir() / ".staging"
@@ -274,7 +293,6 @@ class GenerationService:
                 db = AuthDatabase()
                 user = db.get_user_by_id(job.user_id)
                 is_admin = bool(user and user_is_admin(user))
-                ref_wav, ref_txt = ensure_user_reference(job.user_id, is_admin)
                 staging_dir = user_audio_dir(job.user_id) / ".staging"
 
             staging_dir.mkdir(parents=True, exist_ok=True)
@@ -289,6 +307,15 @@ class GenerationService:
                 job.current_story_id = story_id
                 job.chunk_index = 0
                 job.chunk_total = 0
+
+                if job.user_id == SYSTEM_USER_ID:
+                    try:
+                        ref_wav, ref_txt = ensure_default_reference_for_story(story_id)
+                    except DefaultReferenceUnavailable as exc:
+                        log.warning("Skipping default narration generation: %s", exc)
+                        continue
+                else:
+                    ref_wav, ref_txt = ensure_user_reference(job.user_id, is_admin)
 
                 tmp_out = staging_dir / f"{story_id}.{job.job_id}.m4a"
                 if job.user_id == SYSTEM_USER_ID:

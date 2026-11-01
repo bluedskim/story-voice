@@ -13,12 +13,16 @@ AUDIO_DIR = ROOT / "data" / "audio"  # legacy global audio (not served to member
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
+DEFAULT_VOICE_KEYS = ("defaultVoice", "default_voice", "narratorVoice", "narrator_voice")
+VALID_DEFAULT_VOICES = frozenset({"harry", "dana"})
+
 
 @dataclass(frozen=True)
 class Story:
     id: str
     title: str
     order: int
+    default_voice: str
     path: Path
     body: str
 
@@ -51,13 +55,31 @@ def story_body_from_path(path: Path) -> str:
     return body
 
 
+def story_default_voice_from_meta(meta: dict[str, str]) -> str:
+    for key in DEFAULT_VOICE_KEYS:
+        raw = meta.get(key, "").strip().lower()
+        if raw:
+            if raw not in VALID_DEFAULT_VOICES:
+                raise ValueError(f"unsupported defaultVoice {raw!r}")
+            return raw
+    raise ValueError(f"story front matter missing defaultVoice: {meta.get('id', '?')}")
+
+
 def load_story(path: Path) -> Story:
     raw = path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(raw)
     story_id = meta.get("id") or path.stem
     title = meta.get("title") or story_id
     order = int(meta.get("order", "999"))
-    return Story(id=story_id, title=title, order=order, path=path, body=body)
+    default_voice = story_default_voice_from_meta(meta)
+    return Story(
+        id=story_id,
+        title=title,
+        order=order,
+        default_voice=default_voice,
+        path=path,
+        body=body,
+    )
 
 
 def list_stories(stories_dir: Path | None = None) -> list[Story]:

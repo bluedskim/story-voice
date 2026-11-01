@@ -66,6 +66,8 @@ const STORY_MOTIFS = {
   "ui-joeun-hyeongje": "🌾",
   "geum-dokki-eun-dokki": "🪓",
   "hokburi-yeonggam": "🎶",
+  "haenim-dalnim": "🌞",
+  "heungbu-nolbu": "🐦",
 };
 
 let catalog = [];
