@@ -7,7 +7,7 @@ import {
   refreshAuthFromConfig,
   notifyAuthChange,
 } from "./auth.js";
-import { showAlertModal } from "./modal.js";
+import { showAlertModal, openModal, closeModal } from "./modal.js";
 import { createBufferedStarter } from "./playback.js";
 
 const listEl = document.getElementById("story-list");
@@ -17,11 +17,11 @@ const genStatusEl = document.getElementById("gen-status");
 const genStatusTextEl = document.getElementById("gen-status-text");
 const genProgressEl = document.getElementById("gen-progress");
 const genProgressBarEl = document.getElementById("gen-progress-bar");
-const regenAsrVerifyEl = document.getElementById("regen-asr-verify");
-const regenAsrWrapEl = document.getElementById("regen-asr-wrap");
-const asrHelpEl = document.getElementById("asr-help");
-const asrHelpBtn = document.getElementById("asr-help-btn");
-const asrHelpTipEl = document.getElementById("asr-help-tip");
+const genConfirmModal = document.getElementById("modal-gen-confirm");
+const genConfirmStoryEl = document.getElementById("gen-confirm-story");
+const genConfirmAsrVerifyEl = document.getElementById("gen-confirm-asr-verify");
+const genConfirmSubmitBtn = document.getElementById("gen-confirm-submit");
+const genConfirmCancelBtn = document.getElementById("gen-confirm-cancel");
 
 const recordScriptEl = document.getElementById("record-script");
 const transcriptEl = document.getElementById("transcript");
@@ -216,10 +216,9 @@ function updateWriteGates() {
   if (voiceAuthGateEl) {
     voiceAuthGateEl.hidden = allowed;
   }
-  if (regenAsrWrapEl) regenAsrWrapEl.hidden = !allowed;
-  if (regenAsrVerifyEl) regenAsrVerifyEl.disabled = generationBusy || !allowed;
-  if (asrHelpEl) asrHelpEl.hidden = !allowed;
-  if (!allowed) setAsrHelpOpen(false);
+  if (genConfirmAsrVerifyEl) {
+    genConfirmAsrVerifyEl.disabled = generationBusy || !allowed;
+  }
   if (!allowed) {
     recordBtn.disabled = true;
     prepareVoiceBtn.disabled = true;
@@ -335,7 +334,7 @@ function render() {
     regen.className = "btn btn-secondary regen-btn";
     const personalLabel = story.hasPersonalAudio ? "내 목소리로 다시 만들기" : "내 목소리로 만들기";
     regen.textContent = personalLabel;
-    regen.addEventListener("click", () => enqueueStory(story.id));
+    regen.addEventListener("click", () => openGenerationConfirm(story));
     regen.disabled = generationBusy || (canWrite() && !hasPersonalVoice);
     if (!hasPersonalVoice && canWrite()) {
       regen.title = "목소리 탭에서 내 목소리를 먼저 저장해 주세요";
@@ -523,16 +522,29 @@ npSeekEl.addEventListener("change", () => {
   syncNowPlayingUi();
 });
 
-function generationRequestBody() {
-  return JSON.stringify({ asrVerify: Boolean(regenAsrVerifyEl?.checked) });
+function generationRequestBody(asrVerify) {
+  return JSON.stringify({ asrVerify: Boolean(asrVerify) });
 }
 
-async function enqueueStory(id) {
+function openGenerationConfirm(story) {
+  if (warnLoginRequired()) return;
+  if (!genConfirmModal || !genConfirmStoryEl || !genConfirmAsrVerifyEl) {
+    enqueueStory(story.id, false);
+    return;
+  }
+  genConfirmStoryEl.textContent = `「${story.title}」을(를) 저장한 목소리로 낭독을 만들어요.`;
+  genConfirmAsrVerifyEl.disabled = generationBusy;
+  openModal(genConfirmModal);
+  genConfirmModal.dataset.storyId = story.id;
+  genConfirmSubmitBtn?.focus();
+}
+
+async function enqueueStory(id, asrVerify = false) {
   if (warnLoginRequired()) return;
   const res = await apiFetch(`/api/generation/story/${id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: generationRequestBody(),
+    body: generationRequestBody(asrVerify),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -924,33 +936,26 @@ fileInput.addEventListener("change", () => onFileSelected(fileInput.files?.[0]))
 prepareVoiceBtn.addEventListener("click", prepareVoice);
 saveVoiceBtn.addEventListener("click", saveVoice);
 
-function setAsrHelpOpen(open) {
-  if (!asrHelpBtn || !asrHelpTipEl) return;
-  asrHelpTipEl.hidden = !open;
-  asrHelpBtn.setAttribute("aria-expanded", open ? "true" : "false");
-}
-
-function setupAsrHelp() {
-  if (!asrHelpBtn || !asrHelpTipEl) return;
-  regenAsrVerifyEl?.setAttribute("aria-describedby", "asr-help-tip");
-  asrHelpBtn.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setAsrHelpOpen(asrHelpTipEl.hidden);
+function setupGenerationConfirmModal() {
+  if (!genConfirmModal || genConfirmModal.dataset.bound) return;
+  genConfirmModal.dataset.bound = "1";
+  genConfirmModal.addEventListener("click", (event) => {
+    if (event.target === genConfirmModal) closeModal(genConfirmModal);
   });
-  document.addEventListener("click", (event) => {
-    if (asrHelpTipEl.hidden) return;
-    if (asrHelpBtn.contains(event.target) || asrHelpTipEl.contains(event.target)) return;
-    setAsrHelpOpen(false);
+  genConfirmCancelBtn?.addEventListener("click", () => closeModal(genConfirmModal));
+  genConfirmSubmitBtn?.addEventListener("click", () => {
+    const id = genConfirmModal.dataset.storyId;
+    const asrVerify = Boolean(genConfirmAsrVerifyEl?.checked);
+    closeModal(genConfirmModal);
+    if (id) enqueueStory(id, asrVerify);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || asrHelpTipEl.hidden) return;
-    setAsrHelpOpen(false);
-    asrHelpBtn.focus();
+    if (event.key !== "Escape" || genConfirmModal.hidden) return;
+    closeModal(genConfirmModal);
   });
 }
 
-setupAsrHelp();
+setupGenerationConfirmModal();
 setupTabs();
 initAuthUi();
 if (location.hash === "#voice") {
