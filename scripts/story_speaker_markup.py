@@ -63,3 +63,16 @@ def assert_markup_lines_are_quoted_dialogue(text: str) -> None:
     for key, content in iter_tagged_lines(text):
         if not is_quoted_dialogue_content(content):
             raise AssertionError(f"@{key}: line is not quoted dialogue only: {content!r}")
+
+
+def assert_untagged_lines_have_no_standalone_dialogue(text: str) -> None:
+    """Every line that is only quoted speech must carry an @role: prefix."""
+    for line in text.splitlines():
+        key, _content = parse_speaker_line(line)
+        if key is not None:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if is_quoted_dialogue_content(stripped):
+            raise AssertionError(f"Untagged dialogue line: {stripped!r}")
