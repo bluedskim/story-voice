@@ -222,6 +222,79 @@ def generate_chunks_to_wav(
     return files, sr, time.time() - t_tts
 
 
+def generate_chunks_to_wav_multivoice(
+    model,
+    chunks: list[tuple[str, str, str]],
+    voice_ref_for_index: Callable[[int], object],
+    lang: str,
+    tmpdir: str,
+    sentence_pause: float,
+    paragraph_pause: float,
+    temperature: float | None,
+    dialogue_style: bool = True,
+    on_chunk: ChunkProgress | None = None,
+    voice_label_for_index: Callable[[int], str] | None = None,
+) -> tuple[list[str], int, float]:
+    """Like generate_chunks_to_wav but picks reference per chunk index (for ASR retries)."""
+    sr = getattr(model, "sample_rate", 24000)
+    files: list[str] = []
+    t_tts = time.time()
+
+    for i, chunk in enumerate(chunks):
+        t1 = time.time()
+        f = os.path.join(tmpdir, f"chunk_{i:04d}.wav")
+        sr = synthesize_chunk_to_wav(
+            model,
+            chunk,
+            voice_ref_for_index(i),
+            lang,
+            temperature,
+            Path(f),
+            dialogue_style,
+        )
+        files.append(f)
+        text, _pause, role = chunk
+        voice_note = ""
+        if voice_label_for_index is not None:
+            voice_note = f" voice={voice_label_for_index(i)}"
+        print(
+            f"[{i + 1}/{len(chunks)}] TTS {time.time() - t1:.1f}s [{role}]{voice_note} :: {text[:40]}",
+            file=sys.stderr,
+        )
+        if on_chunk:
+            on_chunk(i + 1, len(chunks))
+
+    sil_sentence = os.path.join(tmpdir, "silence_sentence.wav")
+    sil_paragraph = os.path.join(tmpdir, "silence_paragraph.wav")
+    for path, duration in (
+        (sil_sentence, sentence_pause),
+        (sil_paragraph, paragraph_pause),
+    ):
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                f"anullsrc=r={sr}:cl=mono",
+                "-t",
+                str(duration),
+                "-c:a",
+                "pcm_s16le",
+                path,
+            ],
+            check=True,
+        )
+
+    lst = os.path.join(tmpdir, "list.txt")
+    write_chunk_concat_list(lst, files, chunks, sil_sentence, sil_paragraph)
+
+    return files, sr, time.time() - t_tts
+
+
 def write_chunk_concat_list(
     list_path: str | Path,
     chunk_files: list[str | Path],

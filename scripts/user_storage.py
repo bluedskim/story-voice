@@ -41,35 +41,48 @@ def user_audio_dir(user_id: int) -> Path:
 
 
 def user_ref_wav(user_id: int) -> Path:
-    return user_voice_dir(user_id) / REF_WAV_NAME
+    from voice_slots import ensure_slots_migrated, primary_slot_id, slot_ref_wav
+
+    ensure_slots_migrated(user_id)
+    return slot_ref_wav(user_id, primary_slot_id(user_id))
 
 
 def user_ref_txt(user_id: int) -> Path:
-    return user_voice_dir(user_id) / REF_TXT_NAME
+    from voice_slots import ensure_slots_migrated, primary_slot_id, slot_ref_txt
+
+    ensure_slots_migrated(user_id)
+    return slot_ref_txt(user_id, primary_slot_id(user_id))
 
 
 def user_story_audio(user_id: int, story_id: str) -> Path:
     return user_audio_dir(user_id) / f"{story_id}.m4a"
 
 
-def user_voice_history_dir(user_id: int) -> Path:
-    return user_voice_dir(user_id) / "history"
+def user_voice_history_dir(user_id: int, slot_id: int = 1) -> Path:
+    from voice_slots import slot_history_dir
+
+    return slot_history_dir(user_id, slot_id)
 
 
-def user_voice_pending_dir(user_id: int) -> Path:
-    return user_voice_dir(user_id) / "pending"
+def user_voice_pending_dir(user_id: int, slot_id: int = 1) -> Path:
+    from voice_slots import slot_pending_dir
+
+    return slot_pending_dir(user_id, slot_id)
 
 
 def has_user_reference(user_id: int) -> bool:
-    return user_ref_wav(user_id).is_file() and user_ref_txt(user_id).is_file()
+    from voice_slots import ensure_slots_migrated, list_voice_slots
+
+    ensure_slots_migrated(user_id)
+    return any(s.get("hasReference") for s in list_voice_slots(user_id))
 
 
 def user_reference_version(user_id: int) -> int | None:
-    """Millisecond cache-bust token from reference.wav mtime (None if missing)."""
-    wav = user_ref_wav(user_id)
-    if not wav.is_file():
-        return None
-    return int(wav.stat().st_mtime * 1000)
+    """Millisecond cache-bust token from primary slot reference.wav mtime."""
+    from voice_slots import ensure_slots_migrated, primary_slot_id, slot_reference_version
+
+    ensure_slots_migrated(user_id)
+    return slot_reference_version(user_id, primary_slot_id(user_id))
 
 
 def _legacy_voice_complete() -> bool:
@@ -85,24 +98,33 @@ def migrate_legacy_voice_for_admin(user_id: int) -> bool:
         return False
     if not _legacy_voice_complete():
         return False
+    from voice_slots import slot_dir, slot_ref_txt, slot_ref_wav
+
     voice_dir = user_voice_dir(user_id)
     voice_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(LEGACY_REF_WAV, user_ref_wav(user_id))
-    shutil.copy2(LEGACY_REF_TXT, user_ref_txt(user_id))
+    slot_dir(user_id, 1).mkdir(parents=True, exist_ok=True)
+    shutil.copy2(LEGACY_REF_WAV, slot_ref_wav(user_id, 1))
+    shutil.copy2(LEGACY_REF_TXT, slot_ref_txt(user_id, 1))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_dir = user_voice_history_dir(user_id) / f"legacy-import-{stamp}"
+    backup_dir = user_voice_history_dir(user_id, 1) / f"legacy-import-{stamp}"
     backup_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(LEGACY_REF_WAV, backup_dir / REF_WAV_NAME)
     shutil.copy2(LEGACY_REF_TXT, backup_dir / REF_TXT_NAME)
     meta = {"importedAt": stamp, "source": "legacy_data_voice"}
     (backup_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False) + "\n", encoding="utf-8")
+    from voice_slots import ensure_slot_meta_row, DEFAULT_SLOT_LABEL
+
+    ensure_slot_meta_row(user_id, 1, DEFAULT_SLOT_LABEL)
     return True
 
 
 def ensure_user_reference(user_id: int, is_admin: bool) -> tuple[Path, Path]:
-    """Resolve reference wav/txt for generation; migrate legacy for admins on first use."""
+    """Resolve primary reference wav/txt for generation; migrate legacy for admins on first use."""
     if is_admin:
         migrate_legacy_voice_for_admin(user_id)
+    from voice_slots import ensure_slots_migrated, primary_slot_id, resolve_slot
+
+    ensure_slots_migrated(user_id)
     if not has_user_reference(user_id):
         raise RuntimeError("목소리 샘플이 없어요. 먼저 목소리를 저장해 주세요.")
-    return user_ref_wav(user_id), user_ref_txt(user_id)
+    return resolve_slot(user_id, primary_slot_id(user_id))

@@ -22,6 +22,12 @@ const genConfirmStoryEl = document.getElementById("gen-confirm-story");
 const genConfirmAsrVerifyEl = document.getElementById("gen-confirm-asr-verify");
 const genConfirmSubmitBtn = document.getElementById("gen-confirm-submit");
 const genConfirmCancelBtn = document.getElementById("gen-confirm-cancel");
+const genConfirmRolesEl = document.getElementById("gen-confirm-roles");
+const genConfirmRolesListEl = document.getElementById("gen-confirm-roles-list");
+const voiceSlotBarEl = document.getElementById("voice-slot-bar");
+const voiceSlotSelectEl = document.getElementById("voice-slot-select");
+const voiceSlotAddBtn = document.getElementById("voice-slot-add");
+const voiceSlotLabelEl = document.getElementById("voice-slot-label");
 
 const recordScriptEl = document.getElementById("record-script");
 const transcriptEl = document.getElementById("transcript");
@@ -130,6 +136,9 @@ let recordChunks = [];
 let pendingBlob = null;
 let pendingToken = null;
 let voiceReferenceBust = 0;
+let voiceSlots = [];
+let activeVoiceSlotId = 1;
+let genRoleAssignment = {};
 let previewObjectUrl = null;
 
 function motifFor(id) {
@@ -196,12 +205,93 @@ function setAppBusy(busy) {
 function applyConfigData(data) {
   recordScriptEl.value = data.recordScript || "";
   hasPersonalVoice = Boolean(data.hasPersonalVoice);
+  voiceSlots = Array.isArray(data.voiceSlots) ? data.voiceSlots : [];
   if (data.voiceReferenceVersion) {
     voiceReferenceBust = data.voiceReferenceVersion;
   }
+  renderVoiceSlotUi();
   updateWriteGates();
   syncSavedVoicePreview();
 }
+
+function renderVoiceSlotUi() {
+  if (!voiceSlotBarEl || !voiceSlotSelectEl) return;
+  const show = canWrite();
+  voiceSlotBarEl.hidden = !show;
+  if (!show) return;
+  if (!voiceSlots.length && hasPersonalVoice) {
+    voiceSlots = [{ id: 1, label: "내 목소리", hasReference: true, referenceVersion: voiceReferenceBust }];
+  }
+  voiceSlotSelectEl.innerHTML = "";
+  for (const slot of voiceSlots) {
+    const opt = document.createElement("option");
+    opt.value = String(slot.id);
+    const suffix = slot.hasReference ? "" : " (비어 있음)";
+    opt.textContent = `${slot.label || "내 목소리"}${suffix}`;
+    voiceSlotSelectEl.appendChild(opt);
+  }
+  if (!voiceSlots.some((s) => s.id === activeVoiceSlotId)) {
+    activeVoiceSlotId = voiceSlots[0]?.id || 1;
+  }
+  voiceSlotSelectEl.value = String(activeVoiceSlotId);
+  const current = voiceSlots.find((s) => s.id === activeVoiceSlotId);
+  if (voiceSlotLabelEl && current) {
+    voiceSlotLabelEl.value = current.label || "";
+  }
+  if (voiceSlotAddBtn) {
+    voiceSlotAddBtn.disabled = voiceSlots.length >= (dataMaxVoiceSlots() || 4);
+  }
+}
+
+function dataMaxVoiceSlots() {
+  return 4;
+}
+
+voiceSlotSelectEl?.addEventListener("change", () => {
+  activeVoiceSlotId = Number(voiceSlotSelectEl.value) || 1;
+  renderVoiceSlotUi();
+  syncSavedVoicePreview();
+});
+
+voiceSlotLabelEl?.addEventListener("change", async () => {
+  if (!canWrite()) return;
+  const label = voiceSlotLabelEl.value.trim();
+  if (!label) return;
+  const res = await apiFetch("/api/voice/slots/label", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slotId: activeVoiceSlotId, label }),
+  });
+  if (res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (data.slot) {
+      const idx = voiceSlots.findIndex((s) => s.id === data.slot.id);
+      if (idx >= 0) voiceSlots[idx] = { ...voiceSlots[idx], ...data.slot };
+      else voiceSlots.push(data.slot);
+      renderVoiceSlotUi();
+    }
+  }
+});
+
+voiceSlotAddBtn?.addEventListener("click", async () => {
+  if (warnLoginRequired()) return;
+  const label = (voiceSlotLabelEl?.value || "").trim() || "내 목소리";
+  const res = await apiFetch("/api/voice/slots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showVoiceBlockingAlert(data.error || "목소리를 추가하지 못했어요.");
+    return;
+  }
+  if (data.slot) {
+    voiceSlots.push(data.slot);
+    activeVoiceSlotId = data.slot.id;
+    renderVoiceSlotUi();
+  }
+});
 
 async function loadConfig() {
   const data = await refreshAuthFromConfig({ notify: false });
@@ -524,29 +614,77 @@ npSeekEl.addEventListener("change", () => {
   syncNowPlayingUi();
 });
 
-function generationRequestBody(asrVerify) {
-  return JSON.stringify({ asrVerify: Boolean(asrVerify) });
+function generationRequestBody(asrVerify, assignments) {
+  const payload = { asrVerify: Boolean(asrVerify) };
+  if (assignments && Object.keys(assignments).length) {
+    payload.assignments = assignments;
+  }
+  return JSON.stringify(payload);
 }
 
-function openGenerationConfirm(story) {
+async function openGenerationConfirm(story) {
   if (warnLoginRequired()) return;
   if (!genConfirmModal || !genConfirmStoryEl || !genConfirmAsrVerifyEl) {
-    enqueueStory(story.id, false);
+    enqueueStory(story.id, false, {});
     return;
   }
   genConfirmStoryEl.textContent = `「${story.title}」을(를) 저장한 목소리로 낭독을 만들어요.`;
   genConfirmAsrVerifyEl.disabled = generationBusy;
+  genRoleAssignment = {};
+  if (genConfirmRolesEl && genConfirmRolesListEl) {
+    genConfirmRolesEl.hidden = true;
+    genConfirmRolesListEl.innerHTML = "";
+    try {
+      const res = await apiFetch(`/api/stories/${story.id}/voice-roles`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.showRolePicker && data.roles?.length) {
+        genConfirmRolesEl.hidden = false;
+        const slots = (data.slots || []).filter((s) => s.hasReference);
+        const assignment = data.assignment || {};
+        genRoleAssignment = { ...assignment };
+        for (const role of data.roles) {
+          const row = document.createElement("label");
+          row.className = "gen-role-row";
+          const span = document.createElement("span");
+          span.className = "gen-role-label";
+          span.textContent = role.label;
+          const sel = document.createElement("select");
+          sel.className = "field-input gen-role-select";
+          sel.dataset.roleKey = role.key;
+          for (const slot of slots) {
+            const opt = document.createElement("option");
+            opt.value = String(slot.id);
+            opt.textContent = slot.label || `목소리 ${slot.id}`;
+            sel.appendChild(opt);
+          }
+          const chosen = assignment[role.key] || assignment.narrator || slots[0]?.id;
+          if (chosen) sel.value = String(chosen);
+          sel.addEventListener("change", () => {
+            genRoleAssignment[role.key] = Number(sel.value);
+          });
+          genRoleAssignment[role.key] = Number(sel.value);
+          row.appendChild(span);
+          row.appendChild(sel);
+          genConfirmRolesListEl.appendChild(row);
+        }
+      }
+    } catch {
+      /* single-voice fallback */
+    }
+  }
   openModal(genConfirmModal);
   genConfirmModal.dataset.storyId = story.id;
   genConfirmSubmitBtn?.focus();
 }
 
-async function enqueueStory(id, asrVerify = false) {
+async function enqueueStory(id, asrVerify = false, assignments = null) {
   if (warnLoginRequired()) return;
+  const bodyAssignments =
+    assignments && Object.keys(assignments).length ? assignments : genRoleAssignment;
   const res = await apiFetch(`/api/generation/story/${id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: generationRequestBody(asrVerify),
+    body: generationRequestBody(asrVerify, bodyAssignments),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -658,7 +796,10 @@ function revokePreviewObjectUrl() {
 
 function savedVoicePreviewUrl() {
   const bust = voiceReferenceBust || Date.now();
-  return `/api/voice/reference.wav?v=${bust}`;
+  const slot = activeVoiceSlotId || 1;
+  const current = voiceSlots.find((s) => s.id === slot);
+  const ver = current?.referenceVersion || bust;
+  return `/api/voice/reference.wav?slot=${slot}&v=${ver}`;
 }
 
 function syncPreviewSavedHint() {
@@ -845,6 +986,7 @@ function voiceFormData() {
   const form = new FormData();
   const ext = pendingBlob.type.includes("mp4") ? "recording.m4a" : "recording.webm";
   form.append("audio", pendingBlob, ext);
+  form.append("slotId", String(activeVoiceSlotId || 1));
   return form;
 }
 
@@ -917,11 +1059,24 @@ async function saveVoice() {
   hasPersonalVoice = true;
   pendingBlob = null;
   pendingToken = null;
+  const sid = data.slotId || activeVoiceSlotId || 1;
+  const label = voiceSlotLabelEl?.value?.trim() || "내 목소리";
+  const bust = data.referenceVersion || Date.now();
+  const entry = {
+    id: sid,
+    label,
+    hasReference: true,
+    referenceVersion: bust,
+  };
+  const idx = voiceSlots.findIndex((s) => s.id === sid);
+  if (idx >= 0) voiceSlots[idx] = { ...voiceSlots[idx], ...entry };
+  else voiceSlots.push(entry);
+  activeVoiceSlotId = sid;
+  renderVoiceSlotUi();
   prepareVoiceBtn.disabled = true;
   saveVoiceBtn.disabled = false;
   voiceReviewEl.hidden = true;
   syncVoiceSections();
-  const bust = data.referenceVersion || Date.now();
   setPreviewToSavedReference(bust);
   syncPreviewSavedHint();
   setVoiceStep(3);
@@ -948,8 +1103,9 @@ function setupGenerationConfirmModal() {
   genConfirmSubmitBtn?.addEventListener("click", () => {
     const id = genConfirmModal.dataset.storyId;
     const asrVerify = Boolean(genConfirmAsrVerifyEl?.checked);
+    const assignments = { ...genRoleAssignment };
     closeModal(genConfirmModal);
-    if (id) enqueueStory(id, asrVerify);
+    if (id) enqueueStory(id, asrVerify, assignments);
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || genConfirmModal.hidden) return;

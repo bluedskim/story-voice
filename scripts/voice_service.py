@@ -19,6 +19,13 @@ from user_storage import (
     user_voice_pending_dir,
     has_user_reference,
 )
+from voice_slots import (
+    ensure_slot_meta_row,
+    ensure_slots_migrated,
+    slot_ref_txt,
+    slot_ref_wav,
+    slot_reference_version,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORD_SCRIPT = ROOT / "content" / "record_script.txt"
@@ -54,8 +61,9 @@ def default_record_script() -> str:
     return ""
 
 
-def expected_script_for_match(user_id: int) -> str:
-    ref_txt = user_ref_txt(user_id)
+def expected_script_for_match(user_id: int, slot_id: int = 1) -> str:
+    ensure_slots_migrated(user_id)
+    ref_txt = slot_ref_txt(user_id, slot_id)
     if ref_txt.is_file():
         text = ref_txt.read_text(encoding="utf-8").strip()
         if text:
@@ -153,13 +161,13 @@ def validate_text_fits_duration(transcript: str, duration_sec: float) -> None:
         )
 
 
-def backup_current_reference(user_id: int) -> Path | None:
-    ref_wav = user_ref_wav(user_id)
-    ref_txt = user_ref_txt(user_id)
+def backup_current_reference(user_id: int, slot_id: int = 1) -> Path | None:
+    ref_wav = slot_ref_wav(user_id, slot_id)
+    ref_txt = slot_ref_txt(user_id, slot_id)
     if not ref_wav.is_file() and not ref_txt.is_file():
         return None
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_dir = user_voice_history_dir(user_id) / stamp
+    backup_dir = user_voice_history_dir(user_id, slot_id) / stamp
     backup_dir.mkdir(parents=True, exist_ok=True)
     if ref_wav.is_file():
         shutil.copy2(ref_wav, backup_dir / "reference.wav")
@@ -170,27 +178,42 @@ def backup_current_reference(user_id: int) -> Path | None:
     return backup_dir
 
 
-def commit_reference_wav(user_id: int, wav_path: Path, transcript: str, duration_sec: float) -> dict:
+def commit_reference_wav(
+    user_id: int,
+    wav_path: Path,
+    transcript: str,
+    duration_sec: float,
+    slot_id: int = 1,
+) -> dict:
     validate_text_fits_duration(transcript, duration_sec)
-    backup_dir = backup_current_reference(user_id)
-    voice_dir = user_voice_dir(user_id)
-    voice_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(wav_path, user_ref_wav(user_id))
-    user_ref_txt(user_id).write_text(transcript.strip() + "\n", encoding="utf-8")
+    backup_dir = backup_current_reference(user_id, slot_id)
+    slot_dir_path = slot_ref_wav(user_id, slot_id).parent
+    slot_dir_path.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(wav_path, slot_ref_wav(user_id, slot_id))
+    slot_ref_txt(user_id, slot_id).write_text(transcript.strip() + "\n", encoding="utf-8")
+    from voice_slots import ensure_slot_meta_row, DEFAULT_SLOT_LABEL
+
+    ensure_slot_meta_row(user_id, slot_id, DEFAULT_SLOT_LABEL)
     return {
         "ok": True,
         "durationSec": round(duration_sec, 2),
         "backupDir": str(backup_dir) if backup_dir else None,
+        "slotId": slot_id,
     }
 
 
-def prepare_voice_upload(user_id: int, upload_path: Path, upload_size: int) -> dict:
+def prepare_voice_upload(user_id: int, upload_path: Path, upload_size: int, slot_id: int = 1) -> dict:
+    from voice_slots import MAX_VOICE_SLOTS
+
+    if slot_id < 1 or slot_id > MAX_VOICE_SLOTS:
+        raise VoiceSaveError("잘못된 목소리 번호예요.", "invalid_slot")
+    ensure_slots_migrated(user_id)
     if upload_size > MAX_UPLOAD_BYTES:
         raise VoiceSaveError(
             f"파일이 너무 커요 (최대 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB).",
             "too_large",
         )
-    pending_parent = user_voice_pending_dir(user_id)
+    pending_parent = user_voice_pending_dir(user_id, slot_id)
     pending_parent.mkdir(parents=True, exist_ok=True)
     staging_wav = pending_parent / "_prepare_staging.wav"
     convert_to_reference_wav(upload_path, staging_wav)
@@ -206,15 +229,18 @@ def prepare_voice_upload(user_id: int, upload_path: Path, upload_size: int) -> d
         except VoiceAsrError as exc:
             raise VoiceSaveError(str(exc), "asr_failed")
 
-        expected = expected_script_for_match(user_id)
+        expected = expected_script_for_match(user_id, slot_id)
         script_cer = character_error_rate(expected, asr_text) if expected else 0.0
-        pending = create_pending(user_id, staging_wav, duration, asr_text, expected, script_cer)
+        pending = create_pending(
+            user_id, staging_wav, duration, asr_text, expected, script_cer, slot_id=slot_id
+        )
     finally:
         staging_wav.unlink(missing_ok=True)
 
     match_pct = round(max(0.0, 1.0 - script_cer) * 100)
     return {
         "pendingToken": pending.token,
+        "slotId": slot_id,
         "transcript": asr_text,
         "durationSec": round(duration, 2),
         "scriptCer": round(script_cer, 4),
@@ -265,13 +291,17 @@ def confirm_voice_upload(user_id: int, token: str, transcript: str) -> dict:
 
     saved_transcript = resolve_saved_transcript(pending)
 
-    pending_parent = user_voice_pending_dir(user_id)
+    pending_parent = user_voice_pending_dir(user_id, pending.slot_id)
     with tempfile.TemporaryDirectory(prefix="voice_commit_", dir=pending_parent) as tmp:
         staged = Path(tmp) / "reference.wav"
         shutil.copy2(pending.wav_path, staged)
-        result = commit_reference_wav(user_id, staged, saved_transcript, pending.duration_sec)
+        result = commit_reference_wav(
+            user_id, staged, saved_transcript, pending.duration_sec, slot_id=pending.slot_id
+        )
 
     delete_pending(user_id, token)
+    result["referenceVersion"] = slot_reference_version(user_id, pending.slot_id)
+    result["slotId"] = pending.slot_id
     return result
 
 
@@ -284,7 +314,7 @@ def save_reference(user_id: int, upload_path: Path, transcript: str, upload_size
             "too_large",
         )
 
-    pending_parent = user_voice_pending_dir(user_id)
+    pending_parent = user_voice_pending_dir(user_id, 1)
     pending_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="voice_upload_", dir=pending_parent) as tmp:
         tmp_wav = Path(tmp) / "converted.wav"
@@ -293,13 +323,16 @@ def save_reference(user_id: int, upload_path: Path, transcript: str, upload_size
         validate_duration_sec(duration)
         validate_text_fits_duration(transcript, duration)
 
-        backup_dir = backup_current_reference(user_id)
+        backup_dir = backup_current_reference(user_id, 1)
         voice_dir = user_voice_dir(user_id)
         voice_dir.mkdir(parents=True, exist_ok=True)
+        from voice_slots import slot_dir
+
+        slot_dir(user_id, 1).mkdir(parents=True, exist_ok=True)
         tmp_ref = Path(tmp) / "reference.wav"
         shutil.move(str(tmp_wav), str(tmp_ref))
-        os.replace(tmp_ref, user_ref_wav(user_id))
-        user_ref_txt(user_id).write_text(transcript + "\n", encoding="utf-8")
+        os.replace(tmp_ref, slot_ref_wav(user_id, 1))
+        slot_ref_txt(user_id, 1).write_text(transcript + "\n", encoding="utf-8")
 
     return {
         "ok": True,

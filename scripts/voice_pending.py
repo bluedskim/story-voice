@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from user_storage import user_voice_pending_dir
+from user_storage import user_voice_pending_dir  # slot_id defaults to 1 for legacy callers
 from voice_service import VoiceSaveError
 
 PENDING_TTL_SEC = 30 * 60  # 30 minutes
@@ -26,10 +26,11 @@ class PendingVoice:
     expected_script: str
     script_cer: float
     user_id: int
+    slot_id: int = 1
 
 
-def _pending_root(user_id: int, token: str) -> Path:
-    return user_voice_pending_dir(user_id) / token
+def _pending_root(user_id: int, token: str, slot_id: int = 1) -> Path:
+    return user_voice_pending_dir(user_id, slot_id) / token
 
 
 def cleanup_expired(user_id: int | None = None, now: float | None = None) -> None:
@@ -54,16 +55,27 @@ def cleanup_expired(user_id: int | None = None, now: float | None = None) -> Non
                 shutil.rmtree(child, ignore_errors=True)
 
     if user_id is not None:
-        _clean_dir(user_voice_pending_dir(user_id))
+        from voice_slots import MAX_VOICE_SLOTS
+
+        for sid in range(1, MAX_VOICE_SLOTS + 1):
+            _clean_dir(user_voice_pending_dir(user_id, sid))
         return
     from user_storage import users_dir
+    from voice_slots import MAX_VOICE_SLOTS
 
     base = users_dir()
     if not base.is_dir():
         return
     for user_dir in base.iterdir():
-        if user_dir.is_dir():
-            _clean_dir(user_dir / "voice" / "pending")
+        if not user_dir.is_dir():
+            continue
+        voice = user_dir / "voice"
+        _clean_dir(voice / "pending")
+        slots_root = voice / "slots"
+        if slots_root.is_dir():
+            for slot_path in slots_root.iterdir():
+                if slot_path.is_dir():
+                    _clean_dir(slot_path / "pending")
 
 
 def create_pending(
@@ -73,12 +85,13 @@ def create_pending(
     asr_transcript: str,
     expected_script: str,
     script_cer: float,
+    slot_id: int = 1,
 ) -> PendingVoice:
     cleanup_expired(user_id)
-    pending_dir = user_voice_pending_dir(user_id)
+    pending_dir = user_voice_pending_dir(user_id, slot_id)
     pending_dir.mkdir(parents=True, exist_ok=True)
     token = secrets.token_urlsafe(24)
-    root = _pending_root(user_id, token)
+    root = _pending_root(user_id, token, slot_id)
     root.mkdir(parents=True, exist_ok=False)
     dest_wav = root / "reference.wav"
     shutil.copy2(wav_path, dest_wav)
@@ -89,6 +102,7 @@ def create_pending(
         "expectedScript": expected_script,
         "scriptCer": script_cer,
         "userId": user_id,
+        "slotId": slot_id,
     }
     meta_path = root / "meta.json"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -105,11 +119,21 @@ def create_pending(
     )
 
 
+def _find_pending_root(user_id: int, token: str) -> tuple[Path, int]:
+    from voice_slots import MAX_VOICE_SLOTS
+
+    for sid in range(1, MAX_VOICE_SLOTS + 1):
+        root = _pending_root(user_id, token, sid)
+        if (root / "meta.json").is_file():
+            return root, sid
+    return _pending_root(user_id, token, 1), 1
+
+
 def load_pending(user_id: int, token: str) -> PendingVoice:
     cleanup_expired(user_id)
     if not token or "/" in token or ".." in token:
         raise VoiceSaveError("잘못된 확인 코드예요. 다시 녹음부터 해 주세요.", "invalid_token")
-    root = _pending_root(user_id, token)
+    root, slot_id = _find_pending_root(user_id, token)
     meta_path = root / "meta.json"
     wav_path = root / "reference.wav"
     if not meta_path.is_file() or not wav_path.is_file():
@@ -118,6 +142,7 @@ def load_pending(user_id: int, token: str) -> PendingVoice:
         data = json.loads(meta_path.read_text(encoding="utf-8"))
         created = float(data["createdAt"])
         stored_uid = int(data.get("userId", user_id))
+        slot_id = int(data.get("slotId", slot_id))
     except (json.JSONDecodeError, KeyError, TypeError, ValueError):
         raise VoiceSaveError("확인 시간이 지났어요. 다시 녹음해 주세요.", "expired_token")
     if stored_uid != user_id:
@@ -135,8 +160,10 @@ def load_pending(user_id: int, token: str) -> PendingVoice:
         expected_script=str(data.get("expectedScript", "")),
         script_cer=float(data.get("scriptCer", 0)),
         user_id=user_id,
+        slot_id=slot_id,
     )
 
 
 def delete_pending(user_id: int, token: str) -> None:
-    shutil.rmtree(_pending_root(user_id, token), ignore_errors=True)
+    root, _ = _find_pending_root(user_id, token)
+    shutil.rmtree(root, ignore_errors=True)

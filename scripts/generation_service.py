@@ -308,15 +308,6 @@ class GenerationService:
                 job.chunk_index = 0
                 job.chunk_total = 0
 
-                if job.user_id == SYSTEM_USER_ID:
-                    try:
-                        ref_wav, ref_txt = ensure_default_reference_for_story(story_id)
-                    except DefaultReferenceUnavailable as exc:
-                        log.warning("Skipping default narration generation: %s", exc)
-                        continue
-                else:
-                    ref_wav, ref_txt = ensure_user_reference(job.user_id, is_admin)
-
                 tmp_out = staging_dir / f"{story_id}.{job.job_id}.m4a"
                 if job.user_id == SYSTEM_USER_ID:
                     final_out = default_story_audio(story_id)
@@ -327,15 +318,42 @@ class GenerationService:
                     job.chunk_index = current
                     job.chunk_total = total
 
-                self._backend.generate_story(
-                    story_id,
-                    story.body,
-                    tmp_out,
-                    on_progress,
-                    verify_asr=job.asr_verify,
-                    ref_wav=ref_wav,
-                    ref_txt=ref_txt,
-                )
+                if job.user_id == SYSTEM_USER_ID:
+                    try:
+                        ref_wav, ref_txt = ensure_default_reference_for_story(story_id)
+                    except DefaultReferenceUnavailable as exc:
+                        log.warning("Skipping default narration generation: %s", exc)
+                        continue
+                    self._backend.generate_story(
+                        story_id,
+                        story.body,
+                        tmp_out,
+                        on_progress,
+                        verify_asr=job.asr_verify,
+                        ref_wav=ref_wav,
+                        ref_txt=ref_txt,
+                    )
+                else:
+                    if is_admin:
+                        from user_storage import migrate_legacy_voice_for_admin
+
+                        migrate_legacy_voice_for_admin(job.user_id)
+                    from user_storage import has_user_reference
+
+                    if not has_user_reference(job.user_id):
+                        raise RuntimeError("목소리 샘플이 없어요. 먼저 목소리를 저장해 주세요.")
+                    from member_generation import generate_member_story
+
+                    generate_member_story(
+                        self._backend,
+                        job.user_id,
+                        story_id,
+                        story.body,
+                        tmp_out,
+                        on_progress,
+                        verify_asr=job.asr_verify,
+                    )
+
                 final_out.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(tmp_out, final_out)
 
