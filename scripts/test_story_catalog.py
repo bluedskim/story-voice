@@ -11,13 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from clone_story import story_chunks_for_tts
-from story_catalog import list_stories
+from story_catalog import list_stories, story_default_voice_from_meta
 
 STORY_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 EXPECTED = [
     ("ui-joeun-hyeongje", "의좋은 형제", "dana"),
     ("geum-dokki-eun-dokki", "금도끼 은도끼", "harry"),
-    ("hokburi-yeonggam", "혹부리 영감", "dana"),
+    ("hokburi-yeonggam", "혹부리 영감", "seraphina"),
     ("haenim-dalnim", "해님 달님", "harry"),
     ("heungbu-nolbu", "흥부와 놀부", "dana"),
 ]
@@ -54,8 +54,20 @@ def test_frontend_motifs_cover_catalog() -> None:
     assert keys == {s.id for s in list_stories()}, keys
 
 
+def test_default_voice_validation() -> None:
+    assert story_default_voice_from_meta({"defaultVoice": "seraphina"}) == "seraphina"
+    assert story_default_voice_from_meta({"defaultVoice": "Harry"}) == "harry"
+    try:
+        story_default_voice_from_meta({"defaultVoice": "unknown"})
+    except ValueError as exc:
+        assert "unsupported defaultVoice" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for unknown defaultVoice")
+
+
 def main() -> int:
     test_catalog_ids_titles_and_order()
+    test_default_voice_validation()
     test_story_bodies_are_clean_and_similar_length()
     test_frontend_motifs_cover_catalog()
     print("OK: story catalog")

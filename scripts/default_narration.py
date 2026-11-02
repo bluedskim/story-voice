@@ -5,14 +5,41 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from user_storage import ROOT, REF_TXT_NAME, REF_WAV_NAME
 
 SYSTEM_USER_ID = 0
 
-DEFAULT_VOICE_IDS = frozenset({"harry", "dana"})
-HARRY_LOCAL_WAV = ROOT / "data" / "voice" / "harry" / "harry_script_reference.wav"
+DEFAULT_VOICE_IDS = frozenset({"harry", "dana", "seraphina"})
+
+
+@dataclass(frozen=True)
+class LocalOnlyVoicePaths:
+    """Packaged reference under default voice root, plus a gitignored local wav path."""
+
+    subdir: str
+    local_wav: Path
+
+    def packaged_wav(self, voice_root: Path) -> Path:
+        return voice_root / self.subdir / REF_WAV_NAME
+
+    def expected_locations_hint(self, voice_root: Path) -> str:
+        parts = [str(self.packaged_wav(voice_root)), str(self.local_wav)]
+        return " or ".join(parts)
+
+
+LOCAL_ONLY_VOICES: dict[str, LocalOnlyVoicePaths] = {
+    "harry": LocalOnlyVoicePaths(
+        subdir="harry",
+        local_wav=ROOT / "data" / "voice" / "harry" / "harry_script_reference.wav",
+    ),
+    "seraphina": LocalOnlyVoicePaths(
+        subdir="seraphina",
+        local_wav=ROOT / "data" / "voice" / "seraphina" / REF_WAV_NAME,
+    ),
+}
 
 log = logging.getLogger("story_voice.default_narration")
 
@@ -75,23 +102,40 @@ def voice_reference_dir(voice_id: str) -> Path:
     voice = normalize_default_voice_id(voice_id)
     if voice == "dana":
         return default_voice_root()
-    return default_voice_root() / "harry"
+    paths = LOCAL_ONLY_VOICES.get(voice)
+    if paths:
+        return default_voice_root() / paths.subdir
+    raise ValueError(f"unsupported default voice: {voice_id!r}")
 
 
-def resolve_harry_reference_wav() -> Path | None:
-    packaged = default_voice_root() / "harry" / REF_WAV_NAME
+def resolve_local_only_reference_wav(voice_id: str) -> Path | None:
+    voice = normalize_default_voice_id(voice_id)
+    paths = LOCAL_ONLY_VOICES.get(voice)
+    if not paths:
+        return None
+    voice_root = default_voice_root()
+    packaged = paths.packaged_wav(voice_root)
     if packaged.is_file():
         return packaged
-    if HARRY_LOCAL_WAV.is_file():
-        return HARRY_LOCAL_WAV
+    if paths.local_wav.is_file():
+        return paths.local_wav
     return None
 
 
+def local_only_reference_available(voice_id: str) -> bool:
+    return resolve_local_only_reference_wav(voice_id) is not None
+
+
+def resolve_harry_reference_wav() -> Path | None:
+    return resolve_local_only_reference_wav("harry")
+
+
 def harry_reference_available() -> bool:
-    return resolve_harry_reference_wav() is not None
+    return local_only_reference_available("harry")
 
 
-def resolve_harry_reference_txt(wav: Path) -> Path:
+def resolve_local_only_reference_txt(voice_id: str, wav: Path) -> Path:
+    voice = normalize_default_voice_id(voice_id)
     candidates = [
         wav.with_suffix(".txt"),
         wav.parent / REF_TXT_NAME,
@@ -102,15 +146,25 @@ def resolve_harry_reference_txt(wav: Path) -> Path:
     if RECORD_SCRIPT.is_file() and RECORD_SCRIPT.read_text(encoding="utf-8").strip():
         return RECORD_SCRIPT
     raise DefaultReferenceUnavailable(
-        "harry",
-        detail="Harry reference transcript missing (add .txt beside the wav or content/record_script.txt)",
+        voice,
+        detail=f"{voice} reference transcript missing (add .txt beside the wav or content/record_script.txt)",
     )
+
+
+def resolve_harry_reference_txt(wav: Path) -> Path:
+    return resolve_local_only_reference_txt("harry", wav)
+
+
+def local_only_reference_detail(voice_id: str) -> str:
+    voice = normalize_default_voice_id(voice_id)
+    paths = LOCAL_ONLY_VOICES[voice]
+    return f"expected {paths.expected_locations_hint(default_voice_root())}"
 
 
 def can_generate_default_narration(story_id: str) -> bool:
     voice = story_default_voice(story_id)
-    if voice == "harry":
-        return harry_reference_available()
+    if voice in LOCAL_ONLY_VOICES:
+        return local_only_reference_available(voice)
     return True
 
 
@@ -120,8 +174,8 @@ def default_story_audio(story_id: str) -> Path:
 
 def has_default_reference(voice_id: str | None = None) -> bool:
     voice = normalize_default_voice_id(voice_id or "dana")
-    if voice == "harry":
-        return harry_reference_available()
+    if voice in LOCAL_ONLY_VOICES:
+        return local_only_reference_available(voice)
     voice_dir = voice_reference_dir(voice)
     if (voice_dir / REF_WAV_NAME).is_file() and (voice_dir / REF_TXT_NAME).is_file():
         return True
@@ -130,20 +184,16 @@ def has_default_reference(voice_id: str | None = None) -> bool:
 
 def ensure_default_reference(voice_id: str | None = None) -> tuple[Path, Path]:
     """
-    Ensure system reference wav/txt exist for a catalog default voice (harry | dana).
+    Ensure system reference wav/txt exist for a catalog default voice (harry | dana | seraphina).
     Dana uses legacy data/voice/default/ (default-narration-source.wav → reference.wav).
-    Harry uses data/voice/default/harry/reference.wav or data/voice/harry/harry_script_reference.wav.
+    Local-only voices use packaged reference.wav under default/<voice>/ or a gitignored local wav.
     """
     voice = normalize_default_voice_id(voice_id or "dana")
-    if voice == "harry":
-        wav = resolve_harry_reference_wav()
+    if voice in LOCAL_ONLY_VOICES:
+        wav = resolve_local_only_reference_wav(voice)
         if wav is None:
-            raise DefaultReferenceUnavailable(
-                "harry",
-                detail="expected data/voice/default/harry/reference.wav or "
-                "data/voice/harry/harry_script_reference.wav",
-            )
-        return wav, resolve_harry_reference_txt(wav)
+            raise DefaultReferenceUnavailable(voice, detail=local_only_reference_detail(voice))
+        return wav, resolve_local_only_reference_txt(voice, wav)
 
     voice_dir = voice_reference_dir(voice)
     ref_wav = voice_dir / REF_WAV_NAME
@@ -168,8 +218,8 @@ def ensure_default_reference(voice_id: str | None = None) -> tuple[Path, Path]:
 
 def ensure_default_reference_for_story(story_id: str) -> tuple[Path, Path]:
     voice = story_default_voice(story_id)
-    if voice == "harry" and not harry_reference_available():
-        raise DefaultReferenceUnavailable("harry", story_id=story_id)
+    if voice in LOCAL_ONLY_VOICES and not local_only_reference_available(voice):
+        raise DefaultReferenceUnavailable(voice, story_id=story_id)
     return ensure_default_reference(voice)
 
 

@@ -21,9 +21,12 @@ from story_catalog import list_stories, load_story, write_manifest
 from default_narration import (
     SYSTEM_USER_ID,
     DefaultReferenceUnavailable,
+    LOCAL_ONLY_VOICES,
     can_generate_default_narration,
     default_story_audio,
     ensure_default_reference_for_story,
+    local_only_reference_detail,
+    story_default_voice,
 )
 from user_storage import ensure_user_reference, user_audio_dir, user_story_audio
 
@@ -171,10 +174,16 @@ class GenerationService:
             if not default_story_audio(s.id).is_file() and not can_generate_default_narration(s.id)
         ]
         for story_id in skipped:
+            voice = story_default_voice(story_id)
+            if voice in LOCAL_ONLY_VOICES:
+                detail = local_only_reference_detail(voice)
+            else:
+                detail = "reference files missing"
             log.warning(
-                "Skipping default narration enqueue for %s: Harry reference wav not found "
-                "(data/voice/default/harry/reference.wav or data/voice/harry/harry_script_reference.wav)",
+                "Skipping default narration enqueue for %s: %s reference wav not found (%s)",
                 story_id,
+                voice,
+                detail,
             )
         if not missing:
             return None

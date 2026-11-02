@@ -15,7 +15,7 @@ AUDIO_DIR = ROOT / "data" / "audio"  # legacy global audio (not served to member
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 DEFAULT_VOICE_KEYS = ("defaultVoice", "default_voice", "narratorVoice", "narrator_voice")
-VALID_DEFAULT_VOICES = frozenset({"harry", "dana"})
+VALID_DEFAULT_VOICES = frozenset({"harry", "dana", "seraphina"})
 
 
 @dataclass(frozen=True)
