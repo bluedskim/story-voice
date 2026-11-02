@@ -14,6 +14,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from default_narration import (
     DefaultReferenceUnavailable,
+    LOCAL_ONLY_VOICES,
+    LocalOnlyVoicePaths,
     can_generate_default_narration,
     ensure_default_reference,
     ensure_default_reference_for_story,
@@ -108,6 +110,7 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
 
     old_voice = os.environ.get("STORY_VOICE_DEFAULT_VOICE_DIR")
     old_audio = os.environ.get("STORY_VOICE_DEFAULT_AUDIO_DIR")
+    prior_paths = LOCAL_ONLY_VOICES[voice]
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -116,6 +119,12 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
             dana_root.mkdir(parents=True)
             (dana_root / "reference.wav").write_bytes(b"RIFF" + b"\x00" * 40)
             (dana_root / "reference.txt").write_text(script + "\n", encoding="utf-8")
+
+            # Do not rely on gitignored production refs under data/voice/{harry,seraphina}/.
+            LOCAL_ONLY_VOICES[voice] = LocalOnlyVoicePaths(
+                subdir=prior_paths.subdir,
+                local_wav=tmp_path / "isolated_local" / voice / "reference.wav",
+            )
 
             os.environ["STORY_VOICE_DEFAULT_VOICE_DIR"] = str(dana_root)
             os.environ["STORY_VOICE_DEFAULT_AUDIO_DIR"] = str(audio_dir)
@@ -146,6 +155,7 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
 
             assert resolve_local_only_reference_wav(voice) is None
     finally:
+        LOCAL_ONLY_VOICES[voice] = prior_paths
         if old_voice is None:
             os.environ.pop("STORY_VOICE_DEFAULT_VOICE_DIR", None)
         else:
@@ -165,7 +175,6 @@ def test_seraphina_missing_skips_without_dana_fallback() -> None:
 
 
 def test_seraphina_prefers_packaged_then_local_wav() -> None:
-    from default_narration import LOCAL_ONLY_VOICES, LocalOnlyVoicePaths
     from user_storage import REF_WAV_NAME
 
     record = ROOT / "content" / "record_script.txt"
