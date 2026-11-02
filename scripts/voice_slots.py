@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import shutil
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,15 +21,30 @@ from user_storage import (
 MAX_VOICE_SLOTS = 4
 DEFAULT_SLOT_LABEL = "내 목소리"
 NARRATOR_ROLE_KEY = "narrator"
+DISK_RECOVERED_LABEL_PREFIX = "목소리"
 
 SLOTS_META_NAME = "slots.json"
 SLOTS_DIR_NAME = "slots"
+
+log = logging.getLogger("story_voice.voice_slots")
+
+_user_locks: dict[int, threading.RLock] = {}
+_user_locks_guard = threading.Lock()
 
 
 class VoiceSlotError(Exception):
     def __init__(self, message: str, code: str = "invalid"):
         super().__init__(message)
         self.code = code
+
+
+def _user_lock(user_id: int) -> threading.RLock:
+    with _user_locks_guard:
+        lock = _user_locks.get(user_id)
+        if lock is None:
+            lock = threading.RLock()
+            _user_locks[user_id] = lock
+        return lock
 
 
 def _slots_meta_path(user_id: int) -> Path:
@@ -84,28 +102,153 @@ def slot_reference_version(user_id: int, slot_id: int) -> int | None:
     return int(wav.stat().st_mtime * 1000)
 
 
-def _read_slots_meta(user_id: int) -> list[dict]:
+def _slot_occupied_on_disk(user_id: int, slot_id: int) -> bool:
+    return slot_ref_wav(user_id, slot_id).is_file() or slot_ref_txt(user_id, slot_id).is_file()
+
+
+def _default_recovered_label(slot_id: int) -> str:
+    return f"{DISK_RECOVERED_LABEL_PREFIX} {slot_id}"
+
+
+def _normalize_slots_rows(slots: list[dict]) -> list[dict]:
+    by_id: dict[int, dict] = {}
+    for row in slots:
+        if not isinstance(row, dict):
+            continue
+        raw_id = row.get("id")
+        if raw_id is None:
+            continue
+        try:
+            sid = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if sid < 1 or sid > MAX_VOICE_SLOTS:
+            continue
+        label = str(row.get("label") or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
+        created = row.get("createdAt")
+        if not isinstance(created, str) or not created.strip():
+            created = datetime.now(timezone.utc).isoformat()
+        by_id[sid] = {"id": sid, "label": label, "createdAt": created}
+    return [by_id[i] for i in sorted(by_id.keys())]
+
+
+def _serialize_slots_meta(slots: list[dict]) -> str:
+    ordered = _normalize_slots_rows(slots)
+    payload = {"slots": ordered}
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _backup_corrupt_slots_meta(path: Path) -> Path | None:
+    if not path.is_file():
+        return None
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    backup = path.with_name(f"{path.name}.corrupt-{stamp}")
+    try:
+        shutil.copy2(path, backup)
+        return backup
+    except OSError as exc:
+        log.warning("voice slots: failed to backup corrupt %s: %s", path, exc)
+        return None
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = f".{path.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+    tmp = path.with_name(tmp_name)
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _write_slots_meta(user_id: int, slots: list[dict]) -> bool:
+    """Persist slot metadata if content changed. Returns True if file was written."""
+    path = _slots_meta_path(user_id)
+    new_content = _serialize_slots_meta(slots)
+    if path.is_file():
+        try:
+            existing = path.read_text(encoding="utf-8")
+            if existing == new_content:
+                return False
+        except OSError as exc:
+            log.warning("voice slots: could not read %s for compare: %s", path, exc)
+    _atomic_write_text(path, new_content)
+    return True
+
+
+def _recover_slots_meta_from_disk(user_id: int) -> list[dict]:
+    rows: list[dict] = []
+    now = datetime.now(timezone.utc).isoformat()
+    for sid in range(1, MAX_VOICE_SLOTS + 1):
+        if _slot_occupied_on_disk(user_id, sid):
+            rows.append(
+                {
+                    "id": sid,
+                    "label": _default_recovered_label(sid),
+                    "createdAt": now,
+                }
+            )
+    return rows
+
+
+def _read_slots_meta_file(user_id: int) -> tuple[list[dict] | None, str | None]:
+    """
+    Read slots.json without recovery writes.
+    Returns (slots, None) on success; (None, reason) when file is missing, empty, or invalid.
+    """
     path = _slots_meta_path(user_id)
     if not path.is_file():
-        return []
+        return [], None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        slots = data.get("slots")
-        if isinstance(slots, list):
-            return [s for s in slots if isinstance(s, dict)]
-    except (json.JSONDecodeError, OSError):
-        pass
-    return []
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        log.warning("voice slots: read failed for user %s: %s", user_id, exc)
+        return None, "read_error"
+    if not raw.strip():
+        log.warning("voice slots: empty slots.json for user %s", user_id)
+        return None, "empty"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning("voice slots: invalid JSON for user %s: %s", user_id, exc)
+        return None, "json_error"
+    slots = data.get("slots")
+    if not isinstance(slots, list):
+        log.warning("voice slots: missing slots array for user %s", user_id)
+        return None, "invalid_shape"
+    return _normalize_slots_rows([s for s in slots if isinstance(s, dict)]), None
 
 
-def _write_slots_meta(user_id: int, slots: list[dict]) -> None:
-    voice_dir = user_voice_dir(user_id)
-    voice_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"slots": slots}
-    _slots_meta_path(user_id).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+def _load_slots_meta(user_id: int, *, allow_recovery_write: bool = True) -> list[dict]:
+    rows, err = _read_slots_meta_file(user_id)
+    if err is None:
+        return rows or []
+    path = _slots_meta_path(user_id)
+    if path.is_file():
+        backup = _backup_corrupt_slots_meta(path)
+        if backup:
+            log.info(
+                "voice slots: backed up corrupt meta for user %s to %s",
+                user_id,
+                backup.name,
+            )
+    recovered = _recover_slots_meta_from_disk(user_id)
+    if allow_recovery_write and recovered:
+        _write_slots_meta(user_id, recovered)
+    return recovered
 
 
 def migrate_legacy_single_voice_to_slots(user_id: int) -> bool:
@@ -113,8 +256,15 @@ def migrate_legacy_single_voice_to_slots(user_id: int) -> bool:
     Move data/users/<id>/voice/reference.wav|.txt (+ pending/history) into slot 1.
     Returns True if migration ran.
     """
+    with _user_lock(user_id):
+        return _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+
+
+def _migrate_legacy_single_voice_to_slots_unlocked(user_id: int) -> bool:
     if slot_has_reference(user_id, 1):
-        _ensure_slot_meta_row(user_id, 1, DEFAULT_SLOT_LABEL)
+        meta = _load_slots_meta(user_id, allow_recovery_write=False)
+        if not any(int(s.get("id", 0)) == 1 for s in meta):
+            _ensure_slot_meta_row_unlocked(user_id, 1, DEFAULT_SLOT_LABEL)
         return False
     legacy_wav = _legacy_ref_wav(user_id)
     legacy_txt = _legacy_ref_txt(user_id)
@@ -154,21 +304,31 @@ def migrate_legacy_single_voice_to_slots(user_id: int) -> bool:
         except OSError:
             pass
 
-    _ensure_slot_meta_row(user_id, 1, DEFAULT_SLOT_LABEL)
+    _ensure_slot_meta_row_unlocked(user_id, 1, DEFAULT_SLOT_LABEL)
     return True
 
 
-def ensure_slot_meta_row(user_id: int, slot_id: int, label: str) -> None:
-    slots = _read_slots_meta(user_id)
-    by_id = {int(s.get("id", 0)): s for s in slots if s.get("id") is not None}
+def _ensure_slot_meta_row_unlocked(user_id: int, slot_id: int, label: str) -> None:
+    slots = _load_slots_meta(user_id, allow_recovery_write=False)
+    by_id = {int(s["id"]): s for s in slots}
+    label = (label or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
+    if slot_id in by_id and by_id[slot_id].get("label") == label:
+        return
     if slot_id not in by_id:
         by_id[slot_id] = {
             "id": slot_id,
             "label": label,
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }
+    else:
+        by_id[slot_id]["label"] = label
     ordered = [by_id[i] for i in sorted(by_id.keys()) if 1 <= i <= MAX_VOICE_SLOTS]
     _write_slots_meta(user_id, ordered)
+
+
+def ensure_slot_meta_row(user_id: int, slot_id: int, label: str) -> None:
+    with _user_lock(user_id):
+        _ensure_slot_meta_row_unlocked(user_id, slot_id, label)
 
 
 def _ensure_slot_meta_row(user_id: int, slot_id: int, label: str) -> None:
@@ -176,37 +336,49 @@ def _ensure_slot_meta_row(user_id: int, slot_id: int, label: str) -> None:
 
 
 def ensure_slots_migrated(user_id: int) -> None:
-    migrate_legacy_single_voice_to_slots(user_id)
+    with _user_lock(user_id):
+        _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+
+
+def _collect_slot_ids_for_list(user_id: int, meta: list[dict]) -> list[int]:
+    ids: set[int] = set()
+    for row in meta:
+        try:
+            sid = int(row.get("id", 0))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= sid <= MAX_VOICE_SLOTS:
+            ids.add(sid)
+    for sid in range(1, MAX_VOICE_SLOTS + 1):
+        if _slot_occupied_on_disk(user_id, sid):
+            ids.add(sid)
+    return sorted(ids)
 
 
 def list_voice_slots(user_id: int) -> list[dict]:
-    ensure_slots_migrated(user_id)
-    meta = _read_slots_meta(user_id)
-    out: list[dict] = []
-    for row in sorted(meta, key=lambda s: int(s.get("id", 999))):
-        sid = int(row.get("id", 0))
-        if sid < 1 or sid > MAX_VOICE_SLOTS:
-            continue
-        label = str(row.get("label") or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
-        has_ref = slot_has_reference(user_id, sid)
-        entry = {
-            "id": sid,
-            "label": label,
-            "hasReference": has_ref,
-        }
-        if has_ref:
-            entry["referenceVersion"] = slot_reference_version(user_id, sid)
-        out.append(entry)
-    if not out and slot_has_reference(user_id, 1):
-        out.append(
-            {
-                "id": 1,
-                "label": DEFAULT_SLOT_LABEL,
-                "hasReference": True,
-                "referenceVersion": slot_reference_version(user_id, 1),
+    with _user_lock(user_id):
+        _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+        meta = _load_slots_meta(user_id, allow_recovery_write=True)
+        meta_by_id = {int(s["id"]): s for s in meta}
+        out: list[dict] = []
+        for sid in _collect_slot_ids_for_list(user_id, meta):
+            row = meta_by_id.get(sid)
+            if row:
+                label = str(row.get("label") or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
+            elif _slot_occupied_on_disk(user_id, sid):
+                label = _default_recovered_label(sid)
+            else:
+                label = DEFAULT_SLOT_LABEL
+            has_ref = slot_has_reference(user_id, sid)
+            entry: dict = {
+                "id": sid,
+                "label": label,
+                "hasReference": has_ref,
             }
-        )
-    return out
+            if has_ref:
+                entry["referenceVersion"] = slot_reference_version(user_id, sid)
+            out.append(entry)
+        return out
 
 
 def count_filled_slots(user_id: int) -> int:
@@ -214,77 +386,112 @@ def count_filled_slots(user_id: int) -> int:
 
 
 def next_empty_slot_id(user_id: int) -> int | None:
-    ensure_slots_migrated(user_id)
-    used = {s["id"] for s in list_voice_slots(user_id)}
-    for i in range(1, MAX_VOICE_SLOTS + 1):
-        if i not in used or not slot_has_reference(user_id, i):
-            if not slot_has_reference(user_id, i):
+    with _user_lock(user_id):
+        _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+        used = {s["id"] for s in _list_voice_slots_unlocked(user_id)}
+        for i in range(1, MAX_VOICE_SLOTS + 1):
+            if _slot_occupied_on_disk(user_id, i) or slot_has_reference(user_id, i):
+                continue
+            if i not in used:
                 return i
-    return None
+        return None
+
+
+def _list_voice_slots_unlocked(user_id: int, meta: list[dict] | None = None) -> list[dict]:
+    if meta is None:
+        meta = _load_slots_meta(user_id, allow_recovery_write=False)
+    meta_by_id = {int(s["id"]): s for s in meta}
+    out: list[dict] = []
+    for sid in _collect_slot_ids_for_list(user_id, meta):
+        row = meta_by_id.get(sid)
+        if row:
+            label = str(row.get("label") or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
+        elif _slot_occupied_on_disk(user_id, sid):
+            label = _default_recovered_label(sid)
+        else:
+            label = DEFAULT_SLOT_LABEL
+        has_ref = slot_has_reference(user_id, sid)
+        entry: dict = {
+            "id": sid,
+            "label": label,
+            "hasReference": has_ref,
+        }
+        if has_ref:
+            entry["referenceVersion"] = slot_reference_version(user_id, sid)
+        out.append(entry)
+    return out
 
 
 def create_slot(user_id: int, label: str) -> dict:
-    ensure_slots_migrated(user_id)
-    label = (label or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
-    slots = list_voice_slots(user_id)
-    defined_ids = {s["id"] for s in slots}
-    if len(defined_ids) >= MAX_VOICE_SLOTS:
-        raise VoiceSlotError(
-            f"목소리는 최대 {MAX_VOICE_SLOTS}개까지 저장할 수 있어요.",
-            "slot_limit",
-        )
-    slot_id = None
-    for i in range(1, MAX_VOICE_SLOTS + 1):
-        if i not in defined_ids:
-            slot_id = i
-            break
-    if slot_id is None:
-        raise VoiceSlotError(
-            f"목소리는 최대 {MAX_VOICE_SLOTS}개까지 저장할 수 있어요.",
-            "slot_limit",
-        )
-    _ensure_slot_meta_row(user_id, slot_id, label)
-    slot_dir(user_id, slot_id).mkdir(parents=True, exist_ok=True)
-    return {"id": slot_id, "label": label, "hasReference": False}
+    with _user_lock(user_id):
+        _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+        label = (label or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
+        slots = _list_voice_slots_unlocked(user_id)
+        defined_ids = {s["id"] for s in slots}
+        if len(defined_ids) >= MAX_VOICE_SLOTS:
+            raise VoiceSlotError(
+                f"목소리는 최대 {MAX_VOICE_SLOTS}개까지 저장할 수 있어요.",
+                "slot_limit",
+            )
+        slot_id = None
+        for i in range(1, MAX_VOICE_SLOTS + 1):
+            if _slot_occupied_on_disk(user_id, i):
+                continue
+            if i not in defined_ids:
+                slot_id = i
+                break
+        if slot_id is None:
+            raise VoiceSlotError(
+                f"목소리는 최대 {MAX_VOICE_SLOTS}개까지 저장할 수 있어요.",
+                "slot_limit",
+            )
+        _ensure_slot_meta_row_unlocked(user_id, slot_id, label)
+        slot_dir(user_id, slot_id).mkdir(parents=True, exist_ok=True)
+        return {"id": slot_id, "label": label, "hasReference": False}
 
 
 def update_slot_label(user_id: int, slot_id: int, label: str) -> dict:
     if slot_id < 1 or slot_id > MAX_VOICE_SLOTS:
         raise VoiceSlotError("잘못된 목소리 번호예요.", "invalid_slot")
     label = (label or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
-    slots = _read_slots_meta(user_id)
-    found = False
-    for row in slots:
-        if int(row.get("id", 0)) == slot_id:
-            row["label"] = label
-            found = True
-            break
-    if not found:
-        _ensure_slot_meta_row(user_id, slot_id, label)
-    else:
-        _write_slots_meta(user_id, slots)
-    return {
-        "id": slot_id,
-        "label": label,
-        "hasReference": slot_has_reference(user_id, slot_id),
-        "referenceVersion": slot_reference_version(user_id, slot_id),
-    }
+    with _user_lock(user_id):
+        slots = _load_slots_meta(user_id, allow_recovery_write=False)
+        found = False
+        for row in slots:
+            if int(row.get("id", 0)) == slot_id:
+                if row.get("label") == label:
+                    found = True
+                    break
+                row["label"] = label
+                found = True
+                _write_slots_meta(user_id, slots)
+                break
+        if not found:
+            _ensure_slot_meta_row_unlocked(user_id, slot_id, label)
+        return {
+            "id": slot_id,
+            "label": label,
+            "hasReference": slot_has_reference(user_id, slot_id),
+            "referenceVersion": slot_reference_version(user_id, slot_id),
+        }
 
 
 def resolve_slot(user_id: int, slot_id: int) -> tuple[Path, Path]:
-    ensure_slots_migrated(user_id)
-    if slot_id < 1 or slot_id > MAX_VOICE_SLOTS:
-        raise VoiceSlotError("잘못된 목소리 번호예요.", "invalid_slot")
-    if not slot_has_reference(user_id, slot_id):
-        raise VoiceSlotError("해당 목소리 슬롯에 저장된 녹음이 없어요.", "missing_reference")
-    return slot_ref_wav(user_id, slot_id), slot_ref_txt(user_id, slot_id)
+    with _user_lock(user_id):
+        _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+        if slot_id < 1 or slot_id > MAX_VOICE_SLOTS:
+            raise VoiceSlotError("잘못된 목소리 번호예요.", "invalid_slot")
+        if not slot_has_reference(user_id, slot_id):
+            raise VoiceSlotError("해당 목소리 슬롯에 저장된 녹음이 없어요.", "missing_reference")
+        return slot_ref_wav(user_id, slot_id), slot_ref_txt(user_id, slot_id)
 
 
 def primary_slot_id(user_id: int) -> int:
-    ensure_slots_migrated(user_id)
-    if slot_has_reference(user_id, 1):
+    with _user_lock(user_id):
+        _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+        if slot_has_reference(user_id, 1):
+            return 1
+        for s in _list_voice_slots_unlocked(user_id):
+            if s.get("hasReference"):
+                return int(s["id"])
         return 1
-    for s in list_voice_slots(user_id):
-        if s.get("hasReference"):
-            return int(s["id"])
-    return 1
