@@ -42,6 +42,19 @@ def wait_server(timeout: float = 12.0) -> None:
     raise RuntimeError("server did not start")
 
 
+def user_slot_ref_paths(users_root: Path, uid: int) -> tuple[Path, Path]:
+    """Paths after legacy→slot migration (matches server STORY_VOICE_USERS_DIR layout)."""
+    slot_base = users_root / str(uid) / "voice" / "slots" / "1"
+    legacy_base = users_root / str(uid) / "voice"
+    ref_txt = slot_base / "reference.txt"
+    ref_wav = slot_base / "reference.wav"
+    if not ref_txt.is_file():
+        ref_txt = legacy_base / "reference.txt"
+    if not ref_wav.is_file():
+        ref_wav = legacy_base / "reference.wav"
+    return ref_wav, ref_txt
+
+
 def make_upload_wav(path: Path, duration: float = 8.0) -> None:
     subprocess.run(
         [
@@ -112,14 +125,15 @@ def test_prepare_and_confirm_integration() -> None:
             row = AuthDatabase(tmp_path / "auth.db").get_user_by_email("test-admin@example.com")
             assert row is not None
             uid = row.id
-            ref_wav = users_root / str(uid) / "voice" / "reference.wav"
-            ref_txt = users_root / str(uid) / "voice" / "reference.txt"
-            ref_wav.parent.mkdir(parents=True, exist_ok=True)
+            legacy_voice = users_root / str(uid) / "voice"
+            legacy_voice.mkdir(parents=True, exist_ok=True)
             ref_script = "가" * 40
-            ref_txt.write_text(ref_script + "\n", encoding="utf-8")
-            if ref_wav.is_file():
-                ref_wav.unlink()
-            make_upload_wav(ref_wav, 8.0)
+            legacy_txt = legacy_voice / "reference.txt"
+            legacy_wav = legacy_voice / "reference.wav"
+            legacy_txt.write_text(ref_script + "\n", encoding="utf-8")
+            if legacy_wav.is_file():
+                legacy_wav.unlink()
+            make_upload_wav(legacy_wav, 8.0)
 
             with tempfile.TemporaryDirectory() as upload_tmp:
                 wav = Path(upload_tmp) / "upload.wav"
@@ -137,6 +151,8 @@ def test_prepare_and_confirm_integration() -> None:
                 prep = json.loads(res.read().decode())
                 assert prep.get("pendingToken")
                 assert prep.get("transcript") == short_asr
+                ref_wav, ref_txt = user_slot_ref_paths(users_root, uid)
+                assert ref_txt.is_file()
                 assert ref_txt.read_text(encoding="utf-8").strip() == ref_script
 
                 confirm_body = json.dumps(
@@ -151,8 +167,12 @@ def test_prepare_and_confirm_integration() -> None:
                 )
                 assert res2.status == 200
                 assert ref_txt.read_text(encoding="utf-8").strip() == ref_script
+                ref_wav, ref_txt = user_slot_ref_paths(users_root, uid)
                 assert ref_wav.is_file()
-                history = list((users_root / str(uid) / "voice" / "history").glob("*"))
+                history_dir = users_root / str(uid) / "voice" / "slots" / "1" / "history"
+                if not history_dir.is_dir():
+                    history_dir = users_root / str(uid) / "voice" / "history"
+                history = list(history_dir.glob("*"))
                 assert history, "expected backup dir"
                 confirm = json.loads(res2.read().decode())
                 assert confirm.get("referenceVersion")

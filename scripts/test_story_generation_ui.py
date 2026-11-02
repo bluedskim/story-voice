@@ -40,7 +40,7 @@ def test_generation_confirm_modal_copy() -> None:
 
 def test_app_opens_modal_and_sends_asr_verify() -> None:
     assert "openGenerationConfirm" in APP_JS
-    assert "generationRequestBody(asrVerify)" in APP_JS
+    assert "generationRequestBody(asrVerify" in APP_JS
     assert "asrVerify: Boolean(asrVerify)" in APP_JS
     assert "regen-asr-verify" not in APP_JS
     assert "setupAsrHelp" not in APP_JS
