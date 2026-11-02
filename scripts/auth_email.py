@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 
 from auth_config import mail_from, mail_mode, resend_api_key
+from resend_tls import ResendTlsError, get_resend_ssl_context
 
 LOG = logging.getLogger("story-voice.auth.email")
 
@@ -82,7 +83,12 @@ def send_verification_email(to_email: str, code: str) -> None:
     }
     req = _resend_email_request(api_key, payload)
     try:
-        with urllib.request.urlopen(req, timeout=30) as res:
+        tls_context = get_resend_ssl_context()
+    except ResendTlsError as exc:
+        LOG.error("Resend TLS setup failed: %s", exc)
+        raise EmailSendError("resend_tls_setup") from exc
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=tls_context) as res:
             if res.status >= 400:
                 raise EmailSendError(f"resend status {res.status}")
     except urllib.error.HTTPError as exc:
