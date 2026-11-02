@@ -233,6 +233,7 @@ def generate_chunks_to_wav_multivoice(
     temperature: float | None,
     dialogue_style: bool = True,
     on_chunk: ChunkProgress | None = None,
+    voice_label_for_index: Callable[[int], str] | None = None,
 ) -> tuple[list[str], int, float]:
     """Like generate_chunks_to_wav but picks reference per chunk index (for ASR retries)."""
     sr = getattr(model, "sample_rate", 24000)
@@ -253,8 +254,11 @@ def generate_chunks_to_wav_multivoice(
         )
         files.append(f)
         text, _pause, role = chunk
+        voice_note = ""
+        if voice_label_for_index is not None:
+            voice_note = f" voice={voice_label_for_index(i)}"
         print(
-            f"[{i + 1}/{len(chunks)}] TTS {time.time() - t1:.1f}s [{role}] :: {text[:40]}",
+            f"[{i + 1}/{len(chunks)}] TTS {time.time() - t1:.1f}s [{role}]{voice_note} :: {text[:40]}",
             file=sys.stderr,
         )
         if on_chunk:

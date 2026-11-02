@@ -36,3 +36,30 @@ def strip_speaker_markup(text: str) -> str:
 
 def has_speaker_markup(text: str) -> bool:
     return any(SPEAKER_LINE_RE.match(ln.strip()) for ln in text.splitlines() if ln.strip())
+
+
+def iter_tagged_lines(text: str) -> list[tuple[str, str]]:
+    """Lines with @speaker: prefix → (speaker_key, content after prefix)."""
+    tagged: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        key, content = parse_speaker_line(line)
+        if key is not None:
+            tagged.append((key, content))
+    return tagged
+
+
+def is_quoted_dialogue_content(content: str) -> bool:
+    """True when content is only quoted speech (one dialogue segment)."""
+    from story_segmentation import segment_line
+
+    content = content.strip()
+    if not content:
+        return False
+    segs = segment_line(content)
+    return len(segs) == 1 and segs[0].role == "dialogue"
+
+
+def assert_markup_lines_are_quoted_dialogue(text: str) -> None:
+    for key, content in iter_tagged_lines(text):
+        if not is_quoted_dialogue_content(content):
+            raise AssertionError(f"@{key}: line is not quoted dialogue only: {content!r}")

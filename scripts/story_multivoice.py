@@ -133,6 +133,12 @@ def narrate_story_multivoice(
         def _ref_for_index(i: int) -> object:
             return resolve_voice(chunk_objs[i])
 
+        def _voice_label(i: int) -> str:
+            key = chunk_objs[i].speaker_key
+            if key is None:
+                return "narrator"
+            return f"character:{key}"
+
         _files, sr, t_tts = generate_chunks_to_wav_multivoice(
             active_model,
             chunks,
@@ -143,6 +149,7 @@ def narrate_story_multivoice(
             paragraph_pause,
             temperature,
             dialogue_style=dialogue_style,
+            voice_label_for_index=_voice_label,
         )
         chunk_paths = [Path(p) for p in _files]
         t_asr = 0.0
