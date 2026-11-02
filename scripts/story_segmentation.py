@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from audio_quality_config import DEFAULT_MAX_CHARS
+from story_speaker_markup import parse_speaker_line
 
 # Opening → closing quote pairs (double + single, ASCII + curly)
 _OPENERS = {
@@ -30,6 +31,7 @@ class StoryChunk:
     text: str
     pause_after: str  # sentence | paragraph
     role: str
+    speaker_key: str | None = None  # None → narrator voice in multivoice PoC
 
 
 def _find_next_opener(text: str, start: int) -> int:
@@ -90,19 +92,24 @@ def segment_story_text(text: str) -> list[TextSegment]:
     return segments
 
 
-def _pack_narration(sentences: list[str], max_chars: int) -> list[str]:
+def _pack_narration(
+    sentences: list[str],
+    max_chars: int,
+    speaker_key: str | None = None,
+) -> list[tuple[str, str | None]]:
+    """Pack narration sentences; never mixes speaker_key (always one key per call)."""
     if not sentences:
         return []
-    packed: list[str] = []
+    packed: list[tuple[str, str | None]] = []
     buf = sentences[0]
     for s in sentences[1:]:
         if len(buf) + 1 + len(s) > max_chars:
-            packed.append(buf)
+            packed.append((buf, speaker_key))
             buf = s
         else:
             buf = f"{buf} {s}".strip()
     if buf:
-        packed.append(buf)
+        packed.append((buf, speaker_key))
     return packed
 
 
@@ -113,18 +120,26 @@ def split_story_into_chunks(
     chunks: list[StoryChunk] = []
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n|\n", text.strip()) if p.strip()]
     for para in paragraphs:
-        line_segments = segment_line(para)
+        speaker_key, para_body = parse_speaker_line(para)
+        line_segments = segment_line(para_body)
         para_chunks: list[StoryChunk] = []
         for seg in line_segments:
             if seg.role == "dialogue":
-                para_chunks.append(StoryChunk(seg.text, "sentence", "dialogue"))
+                para_chunks.append(
+                    StoryChunk(seg.text, "sentence", "dialogue", speaker_key=speaker_key)
+                )
                 continue
             sents = [s.strip() for s in SENTENCE_END_RE.split(seg.text) if s.strip()]
-            for part in _pack_narration(sents, max_chars):
-                para_chunks.append(StoryChunk(part, "sentence", "narration"))
+            for part, sk in _pack_narration(sents, max_chars, speaker_key):
+                para_chunks.append(StoryChunk(part, "sentence", "narration", speaker_key=sk))
         if para_chunks:
             last = para_chunks[-1]
-            para_chunks[-1] = StoryChunk(last.text, "paragraph", last.role)
+            para_chunks[-1] = StoryChunk(
+                last.text,
+                "paragraph",
+                last.role,
+                speaker_key=last.speaker_key,
+            )
         chunks.extend(para_chunks)
     return chunks
 

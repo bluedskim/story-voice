@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+from story_speaker_markup import strip_speaker_markup
 STORIES_DIR = ROOT / "content" / "stories"
 AUDIO_DIR = ROOT / "data" / "audio"  # legacy global audio (not served to members)
 
@@ -37,7 +38,7 @@ class Story:
 def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     match = FRONTMATTER_RE.match(text)
     if not match:
-        return {}, text.strip()
+        return {}, strip_speaker_markup(text.strip())
     meta: dict[str, str] = {}
     for line in match.group(1).splitlines():
         if ":" not in line:
@@ -45,6 +46,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         key, value = line.split(":", 1)
         meta[key.strip()] = value.strip()
     body = text[match.end() :].strip()
+    body = strip_speaker_markup(body)
     return meta, body
 
 
