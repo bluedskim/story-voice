@@ -258,6 +258,49 @@ body {
   transition: width 0.35s ease;
 }
 
+.gen-confirm-roles {
+  margin: 0.75rem 0 1rem;
+}
+
+.gen-confirm-roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gen-role-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.gen-role-label {
+  flex: 0 0 5rem;
+  font-size: 0.95rem;
+}
+
+.gen-role-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.voice-slot-bar {
+  margin-bottom: 1rem;
+}
+
+.voice-slot-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.voice-slot-row select {
+  flex: 1;
+  min-width: 8rem;
+}
+
 .gen-confirm-story {
   margin: 0 0 0.85rem;
   font-size: 0.95rem;

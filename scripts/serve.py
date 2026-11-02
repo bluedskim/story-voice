@@ -60,6 +60,24 @@ from user_storage import (
     user_ref_wav,
     user_reference_version,
 )
+from voice_slots import (
+    VoiceSlotError,
+    ensure_slots_migrated,
+    list_voice_slots,
+    create_slot,
+    update_slot_label,
+    slot_ref_wav,
+    slot_reference_version,
+    slot_has_reference,
+    MAX_VOICE_SLOTS,
+)
+from role_assignments import (
+    RoleAssignmentError,
+    load_assignment,
+    save_assignment,
+    story_roles,
+)
+from story_multivoice import story_markup_body_from_id
 from voice_service import (
     MAX_UPLOAD_BYTES,
     MIN_DURATION_SEC,
@@ -214,6 +232,8 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                     },
                     "user": user_public(user) if user else None,
                     "hasPersonalVoice": has_user_reference(user.id) if user else False,
+                    "voiceSlots": list_voice_slots(user.id) if user else [],
+                    "maxVoiceSlots": MAX_VOICE_SLOTS,
                     "voiceReferenceVersion": (
                         user_reference_version(user.id)
                         if user and has_user_reference(user.id)
@@ -258,14 +278,63 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if user_is_admin(user):
                 migrate_legacy_voice_for_admin(user.id)
-            if not has_user_reference(user.id):
+            ensure_slots_migrated(user.id)
+            query = parse_qs(parsed.query)
+            slot_raw = (query.get("slot") or query.get("slotId") or ["1"])[0]
+            try:
+                slot_id = int(slot_raw)
+            except ValueError:
+                slot_id = 1
+            if not slot_has_reference(user.id, slot_id):
                 self._send_error(HTTPStatus.NOT_FOUND)
                 return
-            file_path = _safe_resolve(user_ref_wav(user.id).parent, user_ref_wav(user.id).name)
+            file_path = _safe_resolve(slot_ref_wav(user.id, slot_id).parent, slot_ref_wav(user.id, slot_id).name)
             if file_path is None or not file_path.is_file():
                 self._send_error(HTTPStatus.NOT_FOUND)
                 return
             self._send_file(file_path, "audio/wav")
+            return
+
+        if route == "/api/voice/slots":
+            user = self._current_user()
+            if not user:
+                send_json(self, HTTPStatus.UNAUTHORIZED, {"error": "로그인이 필요해요."})
+                return
+            if user_is_admin(user):
+                migrate_legacy_voice_for_admin(user.id)
+            ensure_slots_migrated(user.id)
+            send_json(
+                self,
+                HTTPStatus.OK,
+                {"slots": list_voice_slots(user.id), "maxSlots": MAX_VOICE_SLOTS},
+            )
+            return
+
+        m_role = re.match(r"^/api/stories/([a-z0-9]+(?:-[a-z0-9]+)*)/voice-roles$", route)
+        if m_role:
+            story_id = m_role.group(1)
+            user = self._current_user()
+            if not user:
+                send_json(self, HTTPStatus.UNAUTHORIZED, {"error": "로그인이 필요해요."})
+                return
+            ensure_slots_migrated(user.id)
+            try:
+                markup = story_markup_body_from_id(story_id)
+            except KeyError:
+                send_json(self, HTTPStatus.NOT_FOUND, {"error": "이야기를 찾을 수 없어요."})
+                return
+            roles = story_roles(markup)
+            assignment = load_assignment(user.id, story_id)
+            filled = sum(1 for s in list_voice_slots(user.id) if s.get("hasReference"))
+            payload = {
+                "storyId": story_id,
+                "roles": roles,
+                "slots": list_voice_slots(user.id),
+                "assignment": assignment.get("assignments") or {},
+                "assignmentValid": assignment.get("valid", True),
+                "showRolePicker": filled >= 2 and len(roles) > 1,
+            }
+            send_json(self, HTTPStatus.OK, payload)
             return
 
         if route == "/api/voice":
@@ -275,7 +344,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 return
             if user_is_admin(user):
                 migrate_legacy_voice_for_admin(user.id)
-            payload = {"hasReference": has_reference(user.id)}
+            payload = {"hasReference": has_reference(user.id), "slots": list_voice_slots(user.id)}
             if has_user_reference(user.id):
                 payload["referenceVersion"] = user_reference_version(user.id)
             send_json(self, HTTPStatus.OK, payload)
@@ -444,6 +513,77 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if route == "/api/voice/slots":
+            if not self._ensure_csrf():
+                return
+            user = self._require_logged_in()
+            if user is None:
+                return
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
+            label = (body.get("label") or "").strip()
+            try:
+                slot = create_slot(user.id, label or "내 목소리")
+                send_json(self, HTTPStatus.CREATED, {"slot": slot})
+            except VoiceSlotError as exc:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
+            return
+
+        if route == "/api/voice/slots/label":
+            if not self._ensure_csrf():
+                return
+            user = self._require_logged_in()
+            if user is None:
+                return
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
+            try:
+                slot_id = int(body.get("slotId"))
+            except (TypeError, ValueError):
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 목소리 번호예요."})
+                return
+            label = (body.get("label") or "").strip()
+            try:
+                slot = update_slot_label(user.id, slot_id, label)
+                send_json(self, HTTPStatus.OK, {"slot": slot})
+            except VoiceSlotError as exc:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
+            return
+
+        m_role_post = re.match(r"^/api/stories/([a-z0-9]+(?:-[a-z0-9]+)*)/voice-roles$", route)
+        if m_role_post:
+            if not self._ensure_csrf():
+                return
+            user = self._require_logged_in()
+            if user is None:
+                return
+            story_id = m_role_post.group(1)
+            body = read_json_body(self)
+            if body is None:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
+            assignments = body.get("assignments")
+            if not isinstance(assignments, dict):
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "역할 배정 형식이 올바르지 않아요."})
+                return
+            cleaned = {}
+            for k, v in assignments.items():
+                try:
+                    cleaned[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 목소리 번호예요."})
+                    return
+            try:
+                saved = save_assignment(user.id, story_id, cleaned)
+                send_json(self, HTTPStatus.OK, saved)
+            except RoleAssignmentError as exc:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
+            return
+
         if route == "/api/voice/prepare":
             if not voice_rate.allow(ip):
                 send_json(self, HTTPStatus.TOO_MANY_REQUESTS, {"error": "요청이 너무 많아요. 잠시 후 다시 시도해 주세요."})
@@ -500,6 +640,20 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             except ValueError:
                 send_json(self, HTTPStatus.BAD_REQUEST, {"error": "asrVerify는 true 또는 false여야 해요."})
                 return
+            role_assignments = body.get("assignments")
+            if isinstance(role_assignments, dict) and role_assignments:
+                cleaned = {}
+                for k, v in role_assignments.items():
+                    try:
+                        cleaned[str(k)] = int(v)
+                    except (TypeError, ValueError):
+                        send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 목소리 번호예요."})
+                        return
+                try:
+                    save_assignment(user.id, story_id, cleaned)
+                except RoleAssignmentError as exc:
+                    send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
+                    return
             try:
                 result = self.app.generation.enqueue_story(
                     story_id,
@@ -544,6 +698,14 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         if form is None or "audio_data" not in form:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": "오디오 파일이 필요해요."})
             return
+        slot_id = 1
+        raw_slot = form.get("slot_id") or form.get("slotId")
+        if raw_slot:
+            try:
+                slot_id = int(raw_slot)
+            except ValueError:
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 목소리 번호예요."})
+                return
         audio_data = form["audio_data"]
         if len(audio_data) > MAX_UPLOAD_BYTES:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": "파일이 너무 커요."})
@@ -553,7 +715,7 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             tmp.write(audio_data)
             tmp_path = Path(tmp.name)
         try:
-            result = prepare_voice_upload(user.id, tmp_path, len(audio_data))
+            result = prepare_voice_upload(user.id, tmp_path, len(audio_data), slot_id=slot_id)
             send_json(self, HTTPStatus.OK, result)
         except VoiceSaveError as exc:
             send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})

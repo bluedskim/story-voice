@@ -75,6 +75,16 @@
           </li>
         </ol>
 
+        <div class="voice-slot-bar card" id="voice-slot-bar" hidden>
+          <label class="field-label" for="voice-slot-select">저장할 목소리</label>
+          <div class="voice-slot-row">
+            <select id="voice-slot-select" class="field-input"></select>
+            <button type="button" id="voice-slot-add" class="btn btn-secondary">목소리 추가</button>
+          </div>
+          <label class="field-label" for="voice-slot-label">이름</label>
+          <input id="voice-slot-label" class="field-input" type="text" maxlength="24" placeholder="예: 엄마, 아빠" />
+        </div>
+
         <div class="voice-flow">
           <section class="card voice-section" id="voice-section-record" aria-labelledby="voice-section-record-title">
             <h2 class="voice-section-title" id="voice-section-record-title">
@@ -236,6 +246,10 @@
       >
         <h2 id="gen-confirm-title" class="auth-title">내 목소리로 만들기</h2>
         <p id="gen-confirm-story" class="gen-confirm-story"></p>
+        <div id="gen-confirm-roles" class="gen-confirm-roles" hidden>
+          <p class="gen-confirm-hint">역할마다 사용할 목소리를 골라 주세요. 비워 두면 낭독자 목소리를 씁니다.</p>
+          <div id="gen-confirm-roles-list" class="gen-confirm-roles-list"></div>
+        </div>
         <label class="gen-confirm-option" for="gen-confirm-asr-verify">
           <input type="checkbox" id="gen-confirm-asr-verify" />
           발음 확인 후 자동 재생성

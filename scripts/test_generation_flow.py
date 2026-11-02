@@ -245,7 +245,7 @@ def main() -> int:
             row = AuthDatabase(db).get_user_by_email("test-admin@example.com")
             assert row is not None
             admin_uid = row.id
-            ref = users_root / str(admin_uid) / "voice" / "reference.wav"
+            ref = users_root / str(admin_uid) / "voice" / "slots" / "1" / "reference.wav"
             assert ref.is_file(), "reference.wav missing"
 
             try:
