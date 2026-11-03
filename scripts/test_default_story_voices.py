@@ -36,6 +36,12 @@ def test_catalog_default_voices() -> None:
         "hokburi-yeonggam": "seraphina",
         "horangi-wa-gotgam": "harry",
         "eunhye-gapeun-kkachi": "dana",
+        "tokki-ui-gan": "harry",
+        "ureong-gaksi": "dana",
+        "cheong-gaeguri": "seraphina",
+        "gyeonu-wa-jiknyeo": "harry",
+        "namukkun-gwa-seonnyeo": "dana",
+        "gae-wa-goyangi-ui-guseul": "seraphina",
     }
     for story in list_stories():
         assert story.default_voice == expected[story.id], story.id

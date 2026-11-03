@@ -74,6 +74,12 @@ const STORY_MOTIFS = {
   "hokburi-yeonggam": "🎶",
   "horangi-wa-gotgam": "🐯",
   "eunhye-gapeun-kkachi": "🐦",
+  "tokki-ui-gan": "🐰",
+  "ureong-gaksi": "🐚",
+  "cheong-gaeguri": "🐸",
+  "gyeonu-wa-jiknyeo": "🌌",
+  "namukkun-gwa-seonnyeo": "🦌",
+  "gae-wa-goyangi-ui-guseul": "💎",
 };
 
 let catalog = [];
