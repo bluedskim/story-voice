@@ -7,7 +7,7 @@ import {
   refreshAuthFromConfig,
   notifyAuthChange,
 } from "./auth.js";
-import { showAlertModal, openModal, closeModal } from "./modal.js";
+import { showAlertModal, showPromptModal, openModal, closeModal } from "./modal.js";
 import { createBufferedStarter } from "./playback.js";
 
 const listEl = document.getElementById("story-list");
@@ -27,7 +27,8 @@ const genConfirmRolesListEl = document.getElementById("gen-confirm-roles-list");
 const voiceSlotBarEl = document.getElementById("voice-slot-bar");
 const voiceSlotSelectEl = document.getElementById("voice-slot-select");
 const voiceSlotAddBtn = document.getElementById("voice-slot-add");
-const voiceSlotLabelEl = document.getElementById("voice-slot-label");
+const voiceSlotLabelDisplayEl = document.getElementById("voice-slot-label-display");
+const voiceSlotRenameBtn = document.getElementById("voice-slot-rename");
 
 const recordScriptEl = document.getElementById("record-script");
 const transcriptEl = document.getElementById("transcript");
@@ -215,9 +216,27 @@ function applyConfigData(data) {
   if (data.voiceReferenceVersion) {
     voiceReferenceBust = data.voiceReferenceVersion;
   }
-  renderVoiceSlotUi();
+  syncVoiceSlotLabelsEverywhere();
   updateWriteGates();
   syncSavedVoicePreview();
+}
+
+function applyVoiceSlotsFromServer(slots) {
+  if (!Array.isArray(slots)) return;
+  voiceSlots = slots;
+  syncVoiceSlotLabelsEverywhere();
+}
+
+function syncVoiceSlotLabelsEverywhere() {
+  renderVoiceSlotUi();
+  if (!genConfirmRolesListEl) return;
+  genConfirmRolesListEl.querySelectorAll(".gen-role-select").forEach((sel) => {
+    for (const opt of sel.options) {
+      const sid = Number(opt.value);
+      const slot = voiceSlots.find((s) => s.id === sid);
+      if (slot) opt.textContent = slot.label || `목소리 ${sid}`;
+    }
+  });
 }
 
 function renderVoiceSlotUi() {
@@ -241,8 +260,11 @@ function renderVoiceSlotUi() {
   }
   voiceSlotSelectEl.value = String(activeVoiceSlotId);
   const current = voiceSlots.find((s) => s.id === activeVoiceSlotId);
-  if (voiceSlotLabelEl && current) {
-    voiceSlotLabelEl.value = current.label || "";
+  if (voiceSlotLabelDisplayEl && current) {
+    voiceSlotLabelDisplayEl.textContent = current.label || "내 목소리";
+  }
+  if (voiceSlotRenameBtn) {
+    voiceSlotRenameBtn.disabled = !current;
   }
   if (voiceSlotAddBtn) {
     voiceSlotAddBtn.disabled = voiceSlots.length >= (dataMaxVoiceSlots() || 4);
@@ -255,33 +277,47 @@ function dataMaxVoiceSlots() {
 
 voiceSlotSelectEl?.addEventListener("change", () => {
   activeVoiceSlotId = Number(voiceSlotSelectEl.value) || 1;
-  renderVoiceSlotUi();
+  syncVoiceSlotLabelsEverywhere();
   syncSavedVoicePreview();
 });
 
-voiceSlotLabelEl?.addEventListener("change", async () => {
+async function renameActiveVoiceSlot() {
   if (!canWrite()) return;
-  const label = voiceSlotLabelEl.value.trim();
-  if (!label) return;
+  const current = voiceSlots.find((s) => s.id === activeVoiceSlotId);
+  if (!current) return;
+  const label = await showPromptModal({
+    title: "목소리 이름",
+    message: "이 목소리를 구분할 이름을 입력해 주세요.",
+    defaultValue: current.label || "내 목소리",
+    maxLength: 20,
+  });
+  if (label == null) return;
   const res = await apiFetch("/api/voice/slots/label", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ slotId: activeVoiceSlotId, label }),
   });
-  if (res.ok) {
-    const data = await res.json().catch(() => ({}));
-    if (data.slot) {
-      const idx = voiceSlots.findIndex((s) => s.id === data.slot.id);
-      if (idx >= 0) voiceSlots[idx] = { ...voiceSlots[idx], ...data.slot };
-      else voiceSlots.push(data.slot);
-      renderVoiceSlotUi();
-    }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showVoiceBlockingAlert(data.error || "이름을 바꾸지 못했어요.");
+    return;
   }
+  applyVoiceSlotsFromServer(data.slots);
+}
+
+voiceSlotRenameBtn?.addEventListener("click", () => {
+  renameActiveVoiceSlot();
 });
 
 voiceSlotAddBtn?.addEventListener("click", async () => {
   if (warnLoginRequired()) return;
-  const label = (voiceSlotLabelEl?.value || "").trim() || "내 목소리";
+  const label = await showPromptModal({
+    title: "새 목소리",
+    message: "추가할 목소리의 이름을 입력해 주세요.",
+    defaultValue: "내 목소리",
+    maxLength: 20,
+  });
+  if (label == null) return;
   const res = await apiFetch("/api/voice/slots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -295,7 +331,7 @@ voiceSlotAddBtn?.addEventListener("click", async () => {
   if (data.slot) {
     voiceSlots.push(data.slot);
     activeVoiceSlotId = data.slot.id;
-    renderVoiceSlotUi();
+    syncVoiceSlotLabelsEverywhere();
   }
 });
 
@@ -1066,7 +1102,10 @@ async function saveVoice() {
   pendingBlob = null;
   pendingToken = null;
   const sid = data.slotId || activeVoiceSlotId || 1;
-  const label = voiceSlotLabelEl?.value?.trim() || "내 목소리";
+  const label =
+    voiceSlots.find((s) => s.id === sid)?.label?.trim() ||
+    voiceSlotLabelDisplayEl?.textContent?.trim() ||
+    "내 목소리";
   const bust = data.referenceVersion || Date.now();
   const entry = {
     id: sid,
@@ -1078,7 +1117,7 @@ async function saveVoice() {
   if (idx >= 0) voiceSlots[idx] = { ...voiceSlots[idx], ...entry };
   else voiceSlots.push(entry);
   activeVoiceSlotId = sid;
-  renderVoiceSlotUi();
+  syncVoiceSlotLabelsEverywhere();
   prepareVoiceBtn.disabled = true;
   saveVoiceBtn.disabled = false;
   voiceReviewEl.hidden = true;
