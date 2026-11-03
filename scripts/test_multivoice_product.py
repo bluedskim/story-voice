@@ -52,12 +52,12 @@ def test_stale_assignment_invalidated() -> None:
 
         uid = 11
         _write_slot(uid, 1)
-        save_assignment(uid, "heungbu-nolbu", {NARRATOR_ROLE_KEY: 1})
+        save_assignment(uid, "eunhye-gapeun-kkachi", {NARRATOR_ROLE_KEY: 1})
         wav = Path(tmp) / str(uid) / "voice" / "slots" / "1" / "reference.wav"
         time.sleep(0.05)
         wav.write_bytes(b"RIFF2")
-        assert invalidate_if_stale(uid, "heungbu-nolbu") is True
-        loaded = load_assignment(uid, "heungbu-nolbu")
+        assert invalidate_if_stale(uid, "eunhye-gapeun-kkachi") is True
+        loaded = load_assignment(uid, "eunhye-gapeun-kkachi")
         assert loaded["assignments"] == {}
 
 
