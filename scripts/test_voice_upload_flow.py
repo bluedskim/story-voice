@@ -76,18 +76,95 @@ def make_upload_wav(path: Path, duration: float = 8.0) -> None:
     )
 
 
-def multipart_audio_only(wav_path: Path) -> bytes:
+def multipart_audio_only(wav_path: Path, slot_id: int | None = None) -> bytes:
     boundary = "----storyvoice"
     audio = wav_path.read_bytes()
-    parts = [
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="audio"; filename="test.wav"\r\n'
-        f"Content-Type: audio/wav\r\n\r\n".encode()
-        + audio
-        + b"\r\n",
-        f"--{boundary}--\r\n".encode(),
-    ]
+    parts: list[bytes] = []
+    if slot_id is not None:
+        parts.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="slotId"\r\n\r\n'
+                f"{slot_id}\r\n"
+            ).encode()
+        )
+    parts.extend(
+        [
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="audio"; filename="test.wav"\r\n'
+            f"Content-Type: audio/wav\r\n\r\n".encode()
+            + audio
+            + b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        ]
+    )
     return b"".join(parts)
+
+
+def test_parse_multipart_body_slot_id() -> None:
+    from http_utils import parse_multipart_body
+
+    boundary = "----storyvoice"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="slotId"\r\n\r\n'
+        f"2\r\n"
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="audio"; filename="t.wav"\r\n'
+        f"Content-Type: audio/wav\r\n\r\n"
+    ).encode() + b"RIFF" + b"\r\n" + f"--{boundary}--\r\n".encode()
+    parsed = parse_multipart_body(body, f"multipart/form-data; boundary={boundary}")
+    assert parsed is not None
+    assert parsed.get("slot_id") == "2"
+
+
+def test_prepare_multipart_slot_id_pending_meta() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        mail_file = tmp_path / "mail.jsonl"
+        env = test_server_env(tmp_path / "auth.db", mail_file, admin_emails="test-admin@example.com")
+        users_root = Path(env["STORY_VOICE_USERS_DIR"])
+        env["STORY_VOICE_VOICE_ASR"] = "fake"
+        short_asr = "가" * 40
+        env["STORY_VOICE_FAKE_ASR_TEXT"] = short_asr
+        proc = subprocess.Popen(
+            [sys.executable, str(ROOT / "scripts" / "serve.py"), "--port", str(PORT), "--generator", "fake"],
+            cwd=ROOT,
+            env=env,
+        )
+        try:
+            wait_server()
+            admin = signup_admin(f"http://127.0.0.1:{PORT}", mail_file)
+            write_hdrs = auth_headers(admin)
+            from auth_db import AuthDatabase
+
+            row = AuthDatabase(tmp_path / "auth.db").get_user_by_email("test-admin@example.com")
+            assert row is not None
+            uid = row.id
+            with tempfile.TemporaryDirectory() as upload_tmp:
+                wav = Path(upload_tmp) / "upload.wav"
+                make_upload_wav(wav, 8.0)
+                res = http(
+                    "POST",
+                    "/api/voice/prepare",
+                    data=multipart_audio_only(wav, slot_id=2),
+                    headers={
+                        "Content-Type": "multipart/form-data; boundary=----storyvoice",
+                        **write_hdrs,
+                    },
+                )
+                assert res.status == 200
+                prep = json.loads(res.read().decode())
+                assert prep.get("slotId") == 2
+                pending_root = users_root / str(uid) / "voice" / "slots" / "2" / "pending"
+                assert pending_root.is_dir()
+                token_dirs = [p for p in pending_root.iterdir() if p.is_dir()]
+                assert len(token_dirs) == 1
+                meta = json.loads((token_dirs[0] / "meta.json").read_text(encoding="utf-8"))
+                assert meta.get("slotId") == 2
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
 
 
 def test_duration_text_bounds_unit() -> None:
@@ -305,6 +382,8 @@ def test_prepare_blocked_during_generation() -> None:
 
 def main() -> int:
     test_duration_text_bounds_unit()
+    test_parse_multipart_body_slot_id()
+    test_prepare_multipart_slot_id_pending_meta()
     test_prepare_and_confirm_integration()
     test_confirm_rejects_script_mismatch()
     test_confirm_rejects_edited_transcript()

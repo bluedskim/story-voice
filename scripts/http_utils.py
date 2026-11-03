@@ -120,6 +120,8 @@ def parse_multipart_body(body: bytes, content_type: str) -> dict | None:
             continue
         if name == "transcript":
             result["transcript"] = content.decode("utf-8", errors="replace")
+        elif name in {"slotId", "slot_id"}:
+            result["slot_id"] = content.decode("utf-8", errors="replace").strip()
         elif name == "audio":
             result["audio_filename"] = filename or "upload.bin"
             result["audio_data"] = content
