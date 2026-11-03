@@ -20,6 +20,12 @@ EXPECTED = [
     ("hokburi-yeonggam", "혹부리 영감", "seraphina"),
     ("horangi-wa-gotgam", "호랑이와 곶감", "harry"),
     ("eunhye-gapeun-kkachi", "은혜 갚은 까치", "dana"),
+    ("tokki-ui-gan", "토끼의 간", "harry"),
+    ("ureong-gaksi", "우렁각시", "dana"),
+    ("cheong-gaeguri", "청개구리", "seraphina"),
+    ("gyeonu-wa-jiknyeo", "견우와 직녀", "harry"),
+    ("namukkun-gwa-seonnyeo", "나무꾼과 선녀", "dana"),
+    ("gae-wa-goyangi-ui-guseul", "개와 고양이의 구슬", "seraphina"),
 ]
 
 
@@ -27,7 +33,7 @@ def test_catalog_ids_titles_and_order() -> None:
     stories = list_stories()
     assert [(s.id, s.title) for s in stories] == [(a, b) for a, b, _ in EXPECTED]
     assert [s.default_voice for s in stories] == [v for _, _, v in EXPECTED]
-    assert [s.order for s in stories] == [1, 2, 3, 4, 5]
+    assert [s.order for s in stories] == list(range(1, len(EXPECTED) + 1))
     for s in stories:
         assert STORY_ID_RE.match(s.id), s.id
         assert s.path.stem == s.id, (s.path, s.id)
