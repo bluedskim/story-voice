@@ -734,8 +734,6 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             return
         try:
             result = confirm_voice_upload(user.id, token, transcript)
-            if has_user_reference(user.id):
-                result["referenceVersion"] = user_reference_version(user.id)
             send_json(self, HTTPStatus.OK, result)
         except VoiceSaveError as exc:
             status = HTTPStatus.BAD_REQUEST
