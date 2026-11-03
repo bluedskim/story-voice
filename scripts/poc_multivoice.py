@@ -36,7 +36,7 @@ def _parse_map_items(raw_maps: list[str]) -> dict[str, tuple[Path, Path | None]]
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Multivoice story PoC (writes only --out).")
-    ap.add_argument("--story", required=True, help="Catalog story id (e.g. heungbu-nolbu)")
+    ap.add_argument("--story", required=True, help="Catalog story id (e.g. eunhye-gapeun-kkachi)")
     ap.add_argument(
         "--narrator",
         required=True,

@@ -21,24 +21,55 @@ from story_speaker_markup import (
 )
 
 # Canonical bodies before @speaker markup (strip(markup file) must match exactly).
-HEUNGBU_CANONICAL_BODY = """\
-옛날 옛적, 한 마을에 형 놀부와 동생 흥부가 살았어요.
-놀부는 부자였지만 마음씨가 고약했고, 흥부는 가난했지만 늘 웃으며 이웃을 도왔답니다.
-어느 봄날, 흥부는 다친 제비 한 마리를 발견하고 정성껏 치료해 주었어요.
-가을이 되자 제비는 큰 박씨 하나를 물고 돌아왔지요.
+HORANGI_WA_GOTGAM_CANONICAL_BODY = """\
+옛날 옛적, 산골짜기 작은 집에 아기와 엄마가 살았어요.
+어느 날 밤, 아기가 갑자기 울음을 그치지 않았어요.
+"으앙, 으앙!"
+엄마는 아기를 안아 재우려 애썼지만 아기는 계속 울었어요.
+엄마는 속삭이며 아기를 달랬어요.
+"호랑이 온다, 호랑이 온다!"
+아기는 잠깐 울음을 멈추고 주변을 두리번거렸어요.
+그러고는 다시 울기 시작했지요.
+엄마는 서랍에서 말린 곶감을 꺼내 아기에게 보여 주었어요.
+"자, 곶감 줄게. 곶감 먹고 조용히 자렴."
+아기는 곶감을 받아들고 입에 넣더니 울음을 그쳤어요.
 
-흥부는 박씨를 마당 한구석에 심어 매일 물을 주었어요.
-박이 여물자 흥부가 조심스레 박을 탔더니, 그 안에서 쌀과 옷감이 나왔어요.
-흥부는 형님과 나누어 쓰려 했지만, 놀부는 부러워하며 제비를 잡아 다리를 부러뜨렸답니다.
+그 말을 들은 산속 호랑이는 깜짝 놀랐어요.
+"곶감이라니, 호랑이보다 더 무서운 것이로구나!"
+호랑이는 곶감이 무엇인지 알고 싶어 집 앞으로 살금살금 다가갔어요.
+그때 어둠 속에서 소도둑이 나타났어요.
+소도둑은 호랑이 등에 올라타며 소리쳤어요.
+"내 소를 찾았다!"
+호랑이는 등에 무언가 올라탄 것을 느끼고 깜짝 놀라 뛰었어요.
+"이런, 곶감이 등에 올라탔어!"
+호랑이는 산 너머까지 달아나 버렸고, 소도둑은 땅에 떨어져 어리둥절했어요.
+아기와 엄마는 조용히 잠든 채 아침 햇살을 맞았답니다."""
 
-놀부도 박씨를 얻어 심었어요.
-그러나 놀부의 박에서는 도깨비들이 튀어나와 집을 어지럽혔어요.
-"욕심만 부리면 선한 마음은 멀어진단다."
-놀부는 고개를 숙이고 흥부에게 미안하다고 말했어요.
+EUNHYE_GAPEUN_KKACHI_CANONICAL_BODY = """\
+옛날 옛적, 과거를 보러 한양으로 가던 선비가 있었어요.
+선비는 깊은 산길을 지나다 큰 구렁이가 까치 둥지를 향해 기어가는 것을 보았어요.
+"짹짹하는 새알, 맛있겠구나."
+선비는 재빨리 나뭇가지를 들고 구렁이를 쫓아냈어요.
+"이 새들은 내가 지킬 거야."
+구렁이는 미끄러져 숲속으로 사라졌고, 까치 새끼들은 무사했답니다.
 
-흥부는 놀부를 용서하고 함께 밥을 나누었어요.
-놀부는 그 뒤로 욕심을 버리고 흥부처럼 이웃을 돕기 시작했답니다.
-마을 사람들은 나눔과 정성이 진짜 보물이라고 말했어요."""
+해가 지자 선비는 산중에 있는 초가집에서 하룻밤 묵기로 했어요.
+집주인 여인은 정갈한 밥을 내놓으며 말했어요.
+"밤이 깊으니 이 방에서 쉬어 가세요."
+선비는 방문을 닫고 잠자리에 누웠어요.
+한밤중, 여인이 방문을 열고 들어왔어요.
+선비는 여인의 눈이 초록빛으로 번뜩이는 것을 보고 깜짝 놀랐어요.
+"낮에 내 남편을 쫓아낸 바로 그 선비군요."
+여인은 선비를 묶어 두고 말했어요.
+"새벽 종이 세 번 울리기 전에 울리면 살려 주마."
+
+선비는 절망 속에서 창밖을 바라보았어요.
+그때 낮에 구해 준 까치들이 종각으로 날아왔어요.
+까치들은 몸으로 종을 세 번 세게 쳤어요.
+둥, 둥, 둥, 종소리가 산골에 울려 퍼졌어요.
+까치들은 힘을 다해 종을 치다 쓰러져 숨을 거두었답니다.
+종소리를 들은 여인은 선비를 풀어 주었고, 선비는 무사히 한양에 이르렀어요.
+선비는 까치의 은혜를 잊지 않고 마을 사람들에게 이 이야기를 전했답니다."""
 
 GEUM_DOKKI_CANONICAL_BODY = """\
 옛날 옛적, 깊은 산속 마을에 마음씨 착한 나무꾼이 살았어요.
@@ -146,7 +177,8 @@ def test_parse_and_strip() -> None:
 
 def test_markup_stories_strip_to_canonical_and_tagged_lines_are_quotes() -> None:
     for story_id, canonical in (
-        ("heungbu-nolbu", HEUNGBU_CANONICAL_BODY),
+        ("horangi-wa-gotgam", HORANGI_WA_GOTGAM_CANONICAL_BODY),
+        ("eunhye-gapeun-kkachi", EUNHYE_GAPEUN_KKACHI_CANONICAL_BODY),
         ("geum-dokki-eun-dokki", GEUM_DOKKI_CANONICAL_BODY),
         ("ui-joeun-hyeongje", UI_JOEUN_HYEONGJE_CANONICAL_BODY),
         ("hokburi-yeonggam", HOKBURI_YEONGGAM_CANONICAL_BODY),
@@ -168,16 +200,24 @@ def test_no_speaker_merge_across_lines() -> None:
     assert all(c.role == "dialogue" for c in chunks)
 
 
-def test_heungbu_single_tagged_quote_chunk() -> None:
-    path = ROOT / "content" / "stories" / "heungbu-nolbu.txt"
+def test_horangi_wa_gotgam_six_dialogue_lines() -> None:
+    markup = _markup_body(ROOT / "content" / "stories" / "horangi-wa-gotgam.txt")
+    tagged = iter_tagged_lines(markup)
+    assert len(tagged) == 6
+    assert [k for k, _ in tagged] == ["아기", "엄마", "엄마", "호랑이", "소도둑", "호랑이"]
+    chunks = split_story_into_chunks(markup, max_chars=120)
+    character = [c for c in chunks if c.speaker_key is not None]
+    assert len(character) == 6
+
+
+def test_eunhye_gapeun_kkachi_five_dialogue_lines() -> None:
+    path = ROOT / "content" / "stories" / "eunhye-gapeun-kkachi.txt"
     story = load_story(path)
     markup = _markup_body(path)
-    assert len(iter_tagged_lines(markup)) == 1
+    tagged = iter_tagged_lines(markup)
+    assert len(tagged) == 5
+    assert [k for k, _ in tagged] == ["구렁이", "선비", "여인", "여인", "여인"]
     chunks_markup = split_story_into_chunks(markup, max_chars=120)
-    character = [c for c in chunks_markup if c.speaker_key is not None]
-    narrator = [c for c in chunks_markup if c.speaker_key is None]
-    assert len(character) == 1
-    assert character[0].text == "욕심만 부리면 선한 마음은 멀어진단다."
     chunks_plain = split_story_into_chunks(story.body, max_chars=120)
     assert [c.text for c in chunks_plain] == [c.text for c in chunks_markup]
     assert [c.role for c in chunks_plain] == [c.role for c in chunks_markup]
@@ -218,7 +258,8 @@ def main() -> int:
     test_parse_and_strip()
     test_markup_stories_strip_to_canonical_and_tagged_lines_are_quotes()
     test_no_speaker_merge_across_lines()
-    test_heungbu_single_tagged_quote_chunk()
+    test_horangi_wa_gotgam_six_dialogue_lines()
+    test_eunhye_gapeun_kkachi_five_dialogue_lines()
     test_geum_dokki_seven_dialogue_chunks()
     test_ui_joeun_hyeongje_three_dialogue_lines()
     test_hokburi_yeonggam_four_dialogue_lines()

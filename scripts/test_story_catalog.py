@@ -18,8 +18,8 @@ EXPECTED = [
     ("ui-joeun-hyeongje", "의좋은 형제", "dana"),
     ("geum-dokki-eun-dokki", "금도끼 은도끼", "harry"),
     ("hokburi-yeonggam", "혹부리 영감", "seraphina"),
-    ("haenim-dalnim", "해님 달님", "harry"),
-    ("heungbu-nolbu", "흥부와 놀부", "dana"),
+    ("horangi-wa-gotgam", "호랑이와 곶감", "harry"),
+    ("eunhye-gapeun-kkachi", "은혜 갚은 까치", "dana"),
 ]
 
 
