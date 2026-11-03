@@ -81,8 +81,11 @@
             <select id="voice-slot-select" class="field-input"></select>
             <button type="button" id="voice-slot-add" class="btn btn-secondary">목소리 추가</button>
           </div>
-          <label class="field-label" for="voice-slot-label">이름</label>
-          <input id="voice-slot-label" class="field-input" type="text" maxlength="24" placeholder="예: 엄마, 아빠" />
+          <label class="field-label">이름</label>
+          <div class="voice-slot-label-row">
+            <span id="voice-slot-label-display" class="voice-slot-label-display">내 목소리</span>
+            <button type="button" id="voice-slot-rename" class="btn btn-secondary btn-sm voice-slot-rename-btn" aria-label="이름 바꾸기" title="이름 바꾸기">✏️</button>
+          </div>
         </div>
 
         <div class="voice-flow">
@@ -260,6 +263,20 @@
         <div class="gen-confirm-actions">
           <button type="button" id="gen-confirm-submit" class="btn btn-primary btn-wide">만들기</button>
           <button type="button" id="gen-confirm-cancel" class="btn btn-secondary btn-wide">취소</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="modal-prompt" class="auth-modal" hidden>
+      <div class="auth-form card prompt-dialog" role="dialog" aria-labelledby="prompt-modal-title">
+        <h2 id="prompt-modal-title" class="auth-title">이름</h2>
+        <p id="prompt-modal-message" class="prompt-modal-message"></p>
+        <label class="field-label" for="prompt-modal-input">이름</label>
+        <input id="prompt-modal-input" class="field-input" type="text" maxlength="20" autocomplete="off" />
+        <p id="prompt-modal-error" class="prompt-modal-error" hidden role="alert"></p>
+        <div class="prompt-modal-actions">
+          <button type="button" id="prompt-modal-cancel" class="btn btn-secondary btn-wide">취소</button>
+          <button type="button" id="prompt-modal-confirm" class="btn btn-primary btn-wide">저장</button>
         </div>
       </div>
     </dialog>

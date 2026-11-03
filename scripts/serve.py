@@ -546,10 +546,17 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 목소리 번호예요."})
                 return
-            label = (body.get("label") or "").strip()
+            label = body.get("label")
+            if label is not None and not isinstance(label, str):
+                send_json(self, HTTPStatus.BAD_REQUEST, {"error": "잘못된 요청이에요."})
+                return
             try:
-                slot = update_slot_label(user.id, slot_id, label)
-                send_json(self, HTTPStatus.OK, {"slot": slot})
+                update_slot_label(user.id, slot_id, label or "")
+                send_json(
+                    self,
+                    HTTPStatus.OK,
+                    {"slots": list_voice_slots(user.id), "maxSlots": MAX_VOICE_SLOTS},
+                )
             except VoiceSlotError as exc:
                 send_json(self, HTTPStatus.BAD_REQUEST, {"error": str(exc), "code": exc.code})
             return

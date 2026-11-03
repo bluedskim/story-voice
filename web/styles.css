@@ -301,6 +301,44 @@ body {
   min-width: 8rem;
 }
 
+.voice-slot-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.voice-slot-label-display {
+  flex: 1;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.voice-slot-rename-btn {
+  flex-shrink: 0;
+}
+
+.prompt-modal-message {
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.prompt-modal-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: var(--danger, #c0392b);
+}
+
+.prompt-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 .gen-confirm-story {
   margin: 0 0 0.85rem;
   font-size: 0.95rem;

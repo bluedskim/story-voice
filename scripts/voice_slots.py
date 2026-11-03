@@ -19,6 +19,7 @@ from user_storage import (
 )
 
 MAX_VOICE_SLOTS = 4
+MAX_SLOT_LABEL_LEN = 20
 DEFAULT_SLOT_LABEL = "내 목소리"
 NARRATOR_ROLE_KEY = "narrator"
 DISK_RECOVERED_LABEL_PREFIX = "목소리"
@@ -450,30 +451,44 @@ def create_slot(user_id: int, label: str) -> dict:
         return {"id": slot_id, "label": label, "hasReference": False}
 
 
-def update_slot_label(user_id: int, slot_id: int, label: str) -> dict:
+def _user_has_slot_unlocked(user_id: int, slot_id: int, meta: list[dict]) -> bool:
+    if any(int(s.get("id", 0)) == slot_id for s in meta):
+        return True
+    return _slot_occupied_on_disk(user_id, slot_id)
+
+
+def _validate_slot_label(label: str) -> str:
+    cleaned = (label or "").strip()
+    if not cleaned:
+        raise VoiceSlotError("이름을 입력해 주세요.", "empty_label")
+    if len(cleaned) > MAX_SLOT_LABEL_LEN:
+        raise VoiceSlotError(
+            f"이름은 {MAX_SLOT_LABEL_LEN}자 이하여야 해요.",
+            "label_too_long",
+        )
+    return cleaned
+
+
+def update_slot_label(user_id: int, slot_id: int, label: str) -> list[dict]:
     if slot_id < 1 or slot_id > MAX_VOICE_SLOTS:
         raise VoiceSlotError("잘못된 목소리 번호예요.", "invalid_slot")
-    label = (label or DEFAULT_SLOT_LABEL).strip() or DEFAULT_SLOT_LABEL
+    label = _validate_slot_label(label)
     with _user_lock(user_id):
-        slots = _load_slots_meta(user_id, allow_recovery_write=False)
-        found = False
-        for row in slots:
+        _migrate_legacy_single_voice_to_slots_unlocked(user_id)
+        meta = _load_slots_meta(user_id, allow_recovery_write=False)
+        if not _user_has_slot_unlocked(user_id, slot_id, meta):
+            raise VoiceSlotError("해당 목소리를 찾을 수 없어요.", "unknown_slot")
+        updated = False
+        for row in meta:
             if int(row.get("id", 0)) == slot_id:
-                if row.get("label") == label:
-                    found = True
-                    break
-                row["label"] = label
-                found = True
-                _write_slots_meta(user_id, slots)
+                if row.get("label") != label:
+                    row["label"] = label
+                    _write_slots_meta(user_id, meta)
+                updated = True
                 break
-        if not found:
+        if not updated:
             _ensure_slot_meta_row_unlocked(user_id, slot_id, label)
-        return {
-            "id": slot_id,
-            "label": label,
-            "hasReference": slot_has_reference(user_id, slot_id),
-            "referenceVersion": slot_reference_version(user_id, slot_id),
-        }
+        return _list_voice_slots_unlocked(user_id)
 
 
 def resolve_slot(user_id: int, slot_id: int) -> tuple[Path, Path]:
