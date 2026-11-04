@@ -97,6 +97,25 @@ def test_generation_done_completion_notice() -> None:
     assert "새 목소리로 만들었어요" not in done_block.group(1)
 
 
+def test_story_card_status_copy() -> None:
+    personal_branch = re.search(
+        r'if \(story\.audioSource === "personal"\)\s*\{[^}]+\}',
+        APP_JS,
+    )
+    assert personal_branch, "storyStatusMessage personal branch missing"
+    assert "내 목소리로 재생할 준비됐어요" not in APP_JS
+    assert 'return ""' in personal_branch.group(0)
+    assert "기본 낭독을 준비하는 중이에요" in APP_JS
+    assert "기본 낭독으로 들을 수 있어요" in APP_JS
+    assert "applyStoryStatus" in APP_JS
+    assert "restoreStoryStatus" in APP_JS
+    assert 'setStatus(card, "재생 중…")' not in APP_JS
+    assert 'setStatus(card, "일시정지")' not in APP_JS
+    assert 'setStatus(card, "끝났어요.")' not in APP_JS
+    assert "불러오는 중…" in APP_JS
+    assert "재생할 수 없어요" in APP_JS
+
+
 if __name__ == "__main__":
     test_stories_tab_has_no_always_visible_asr_checkbox()
     test_generation_confirm_modal_copy()
@@ -104,4 +123,5 @@ if __name__ == "__main__":
     test_generation_progress_on_story_card()
     test_generation_done_updates_story_card_in_place()
     test_generation_done_completion_notice()
+    test_story_card_status_copy()
     print("ok")

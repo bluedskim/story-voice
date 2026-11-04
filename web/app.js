@@ -171,9 +171,35 @@ function playIcon(playing) {
   return playing ? "⏸" : "▶";
 }
 
-function setStatus(card, message) {
+function applyStoryStatus(card, message) {
   const el = card.querySelector(".story-status");
-  if (el) el.textContent = message;
+  if (!el) return;
+  if (message) {
+    el.textContent = message;
+    el.hidden = false;
+  } else {
+    el.textContent = "";
+    el.hidden = true;
+  }
+}
+
+function restoreStoryStatus(card) {
+  if (!card) return;
+  const story = catalog.find((s) => s.id === card.dataset.id);
+  applyStoryStatus(card, story ? storyStatusMessage(story) : "");
+}
+
+function setStatus(card, message) {
+  applyStoryStatus(card, message);
+}
+
+function unhideGenStoryStatuses() {
+  document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
+    el.removeAttribute("data-gen-hidden");
+    const card = el.closest(".story-card");
+    if (card) restoreStoryStatus(card);
+    else el.hidden = false;
+  });
 }
 
 function storyTitleForId(id) {
@@ -189,10 +215,7 @@ function genProgressPercent(chunkIndex, chunkTotal) {
 function clearGenCardProgress() {
   genCardState = null;
   document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
-  document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
-    el.hidden = false;
-    el.removeAttribute("data-gen-hidden");
-  });
+  unhideGenStoryStatuses();
 }
 
 function mountStoryGenProgress(card, state) {
@@ -236,10 +259,7 @@ function syncGenCardProgressUi() {
     }
   });
   if (!genCardState) {
-    document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
-      el.hidden = false;
-      el.removeAttribute("data-gen-hidden");
-    });
+    unhideGenStoryStatuses();
     return;
   }
   const card = document.querySelector(
@@ -275,7 +295,7 @@ function storyStatusMessage(story) {
     return "기본 낭독을 준비하는 중이에요. 잠시만 기다려 주세요.";
   }
   if (story.audioSource === "personal") {
-    return "내 목소리로 재생할 준비됐어요";
+    return "";
   }
   return "기본 낭독으로 들을 수 있어요. 내 목소리는 목소리 탭에서 저장 후 만들 수 있어요.";
 }
@@ -309,8 +329,8 @@ function patchStoryCardInPlace(story) {
   const statusEl = card.querySelector(".story-status");
   const keepStatus =
     activeId === story.id && (!audio.paused || playLoading);
-  if (statusEl && !statusEl.hidden && !keepStatus) {
-    statusEl.textContent = storyStatusMessage(story);
+  if (statusEl && !statusEl.dataset.genHidden && !keepStatus) {
+    applyStoryStatus(card, storyStatusMessage(story));
   }
 
   const playBtn = card.querySelector(".play-btn");
@@ -476,11 +496,11 @@ function mountStoryGenComplete(story) {
     wrap.remove();
     card.classList.remove("is-gen-complete");
     genCompleteCardTimers.delete(story.id);
-    if (statusEl && !statusEl.hidden) {
+    if (statusEl && !statusEl.dataset.genHidden) {
       const keepStatus =
         activeId === story.id && (!audio.paused || playLoading);
       if (!keepStatus) {
-        statusEl.textContent = storyStatusMessage(story);
+        applyStoryStatus(card, storyStatusMessage(story));
       }
     }
   }, GEN_COMPLETE_CARD_MS);
@@ -779,7 +799,12 @@ function render() {
 
     const status = document.createElement("p");
     status.className = "story-status";
-    status.textContent = storyStatusMessage(story);
+    const statusMsg = storyStatusMessage(story);
+    if (statusMsg) {
+      status.textContent = statusMsg;
+    } else {
+      status.hidden = true;
+    }
 
     const regen = document.createElement("button");
     regen.type = "button";
@@ -875,7 +900,10 @@ const playStarter = createBufferedStarter(audio);
 function setPlayLoading(on) {
   playLoading = on;
   const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
-  if (card && on) setStatus(card, "불러오는 중…");
+  if (card) {
+    if (on) setStatus(card, "불러오는 중…");
+    else if (audio.paused) restoreStoryStatus(card);
+  }
   syncNowPlayingUi();
 }
 
@@ -895,7 +923,7 @@ function togglePlayback(story, card, btn) {
     playLoading = false;
     audio.pause();
     card.classList.remove("is-active");
-    setStatus(card, "일시정지");
+    restoreStoryStatus(card);
     syncNowPlayingUi();
     return;
   }
@@ -920,7 +948,7 @@ audio.addEventListener("timeupdate", syncNowPlayingUi);
 audio.addEventListener("playing", () => {
   if (audio.muted) return; // still priming while buffering
   const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
-  if (card) setStatus(card, "재생 중…");
+  if (card) restoreStoryStatus(card);
   npPlayBtn.classList.remove("is-buffering");
   syncNowPlayingUi();
 });
@@ -932,7 +960,7 @@ audio.addEventListener("loadedmetadata", syncNowPlayingUi);
 audio.addEventListener("ended", () => {
   const card = document.querySelector(`.story-card[data-id="${activeId}"]`);
   if (card) {
-    setStatus(card, "끝났어요.");
+    restoreStoryStatus(card);
     card.classList.remove("is-active");
   }
   syncNowPlayingUi();
@@ -940,6 +968,8 @@ audio.addEventListener("ended", () => {
 
 audio.addEventListener("pause", () => {
   if (audio.ended) return;
+  const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
+  if (card && !playLoading) restoreStoryStatus(card);
   syncNowPlayingUi();
 });
 
@@ -950,6 +980,7 @@ npPlayBtn.addEventListener("click", () => {
     playStarter.cancel();
     playLoading = false;
     audio.pause();
+    if (card) restoreStoryStatus(card);
   } else if (audio.paused) {
     startActivePlayback(card);
   } else {
