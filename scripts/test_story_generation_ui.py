@@ -123,6 +123,36 @@ def test_story_card_has_no_download_button() -> None:
     assert "내 목소리로 만들기" in APP_JS
 
 
+def test_generation_polling_resumes_while_job_active() -> None:
+    assert re.search(r"loadCatalog\(\);\s*\nstartPolling\(\);", APP_JS)
+    assert re.search(
+        r"loadCatalog\(\);\s*\npollGeneration\(\);",
+        APP_JS,
+    ) is None
+    poll_body = re.search(
+        r"async function pollGeneration\(\)\s*\{(.+?)}\n\nfunction ensureGenerationPolling",
+        APP_JS,
+        re.S,
+    )
+    assert poll_body, "pollGeneration block missing"
+    body = poll_body.group(1)
+    running = re.search(r"if \(running\)\s*\{(.+?)\n  \}", body, re.S)
+    assert running and "ensureGenerationPolling()" in running.group(1)
+    queued = re.search(r"if \(data\.queued\?\.length\)\s*\{(.+?)\n  \}", body, re.S)
+    assert queued and "ensureGenerationPolling()" in queued.group(1)
+    assert "function ensureGenerationPolling()" in APP_JS
+    assert "visibilitychange" in APP_JS
+    assert "resumeGenerationPollingOnVisible" in APP_JS
+    assert "lastHandledGenerationJobId" in APP_JS
+    done_block = re.search(
+        r'if \(last\?\.state === "done"\)\s*\{(.+?)\n  \}',
+        body,
+        re.S,
+    )
+    assert done_block
+    assert "lastHandledGenerationJobId" in done_block.group(1)
+
+
 if __name__ == "__main__":
     test_stories_tab_has_no_always_visible_asr_checkbox()
     test_generation_confirm_modal_copy()
@@ -132,4 +162,5 @@ if __name__ == "__main__":
     test_generation_done_completion_notice()
     test_story_card_status_copy()
     test_story_card_has_no_download_button()
+    test_generation_polling_resumes_while_job_active()
     print("ok")

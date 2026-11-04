@@ -90,6 +90,7 @@ let activeId = null;
 let activeStory = null;
 let audioCacheBust = Date.now();
 let pollTimer = null;
+let lastHandledGenerationJobId = null;
 let durationCache = {};
 let generationBusy = false;
 /** @type {{ storyId: string, chunkIndex: number, chunkTotal: number } | null} */
@@ -1088,23 +1089,33 @@ async function pollGeneration() {
       running.chunkIndex || 0,
       running.chunkTotal || 1
     );
+    ensureGenerationPolling();
     return;
   }
   if (data.queued?.length) {
     setAppBusy(true);
     clearGenCardProgress();
     showGenStatus(`대기 중… (${data.queued.length}개)`, false);
+    ensureGenerationPolling();
     return;
   }
   setAppBusy(false);
   const last = data.recent?.[0];
   if (last?.state === "failed") {
     clearGenCardProgress();
-    showGenerationBlockingAlert(last.error || "실패했어요.");
+    if (!last.jobId || last.jobId !== lastHandledGenerationJobId) {
+      if (last.jobId) lastHandledGenerationJobId = last.jobId;
+      showGenerationBlockingAlert(last.error || "실패했어요.");
+    }
     stopPolling();
     return;
   }
   if (last?.state === "done") {
+    if (last.jobId && last.jobId === lastHandledGenerationJobId) {
+      stopPolling();
+      return;
+    }
+    if (last.jobId) lastHandledGenerationJobId = last.jobId;
     const storyIds = storyIdsFromRecentJob(last);
     genCardState = null;
     document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
@@ -1123,10 +1134,14 @@ async function pollGeneration() {
   showGenStatus("");
 }
 
-function startPolling() {
+function ensureGenerationPolling() {
   if (pollTimer) return;
   pollTimer = setInterval(pollGeneration, 1500);
-  pollGeneration();
+}
+
+function startPolling() {
+  ensureGenerationPolling();
+  void pollGeneration();
 }
 
 function stopPolling() {
@@ -1136,6 +1151,14 @@ function stopPolling() {
   }
   setAppBusy(false);
 }
+
+function resumeGenerationPollingOnVisible() {
+  if (document.visibilityState !== "visible") return;
+  ensureGenerationPolling();
+  void pollGeneration();
+}
+
+document.addEventListener("visibilitychange", resumeGenerationPollingOnVisible);
 
 function setupTabs() {
   document.querySelectorAll(".tab").forEach((tab) => {
@@ -1496,4 +1519,4 @@ setVoiceStep(1);
 syncVoiceSections();
 loadConfig().catch(() => {});
 loadCatalog();
-pollGeneration();
+startPolling();
