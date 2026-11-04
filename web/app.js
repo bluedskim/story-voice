@@ -15,6 +15,9 @@ const voiceAuthGateEl = document.getElementById("voice-auth-gate");
 const audio = document.getElementById("player");
 const genStatusEl = document.getElementById("gen-status");
 const genStatusTextEl = document.getElementById("gen-status-text");
+const genCompleteToastEl = document.getElementById("gen-complete-toast");
+const genCompleteToastTextEl = document.getElementById("gen-complete-toast-text");
+const genCompleteToastPlayBtn = document.getElementById("gen-complete-toast-play");
 const genConfirmModal = document.getElementById("modal-gen-confirm");
 const genConfirmStoryEl = document.getElementById("gen-confirm-story");
 const genConfirmAsrVerifyEl = document.getElementById("gen-confirm-asr-verify");
@@ -91,6 +94,11 @@ let durationCache = {};
 let generationBusy = false;
 /** @type {{ storyId: string, chunkIndex: number, chunkTotal: number } | null} */
 let genCardState = null;
+const GEN_COMPLETE_CARD_MS = 5000;
+const GEN_COMPLETE_TOAST_MS = 8000;
+/** @type {Map<string, number>} */
+const genCompleteCardTimers = new Map();
+let genCompleteToastTimer = null;
 let seekDragging = false;
 let playLoading = false;
 let previewSeekDragging = false;
@@ -381,6 +389,113 @@ async function applyGenerationDone(last) {
   if (needFullReload) {
     await loadCatalog({ showLoading: false });
   }
+}
+
+function dismissGenCompleteToast() {
+  if (genCompleteToastTimer) {
+    clearTimeout(genCompleteToastTimer);
+    genCompleteToastTimer = null;
+  }
+  if (genCompleteToastEl) genCompleteToastEl.hidden = true;
+}
+
+function syncGenCompleteToastOffset() {
+  document.body.classList.toggle(
+    "has-now-playing",
+    Boolean(nowPlayingEl && !nowPlayingEl.hidden)
+  );
+}
+
+function playStoryFromCard(story) {
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(story.id)}"]`
+  );
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  const playBtn = card.querySelector(".play-btn");
+  if (playBtn && !playBtn.disabled) {
+    togglePlayback(story, card, playBtn);
+  }
+}
+
+function showGenCompleteToast(story) {
+  if (!genCompleteToastEl || !genCompleteToastTextEl || !genCompleteToastPlayBtn) return;
+  dismissGenCompleteToast();
+  genCompleteToastTextEl.textContent = `「${story.title}」 이야기가 완성됐어요`;
+  genCompleteToastPlayBtn.onclick = () => {
+    dismissGenCompleteToast();
+    playStoryFromCard(story);
+  };
+  syncGenCompleteToastOffset();
+  genCompleteToastEl.hidden = false;
+  genCompleteToastTimer = window.setTimeout(dismissGenCompleteToast, GEN_COMPLETE_TOAST_MS);
+}
+
+function clearStoryGenCompleteUi(storyId) {
+  const prev = genCompleteCardTimers.get(storyId);
+  if (prev) window.clearTimeout(prev);
+  genCompleteCardTimers.delete(storyId);
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(storyId)}"]`
+  );
+  card?.querySelector(".story-gen-complete")?.remove();
+  card?.classList.remove("is-gen-complete");
+}
+
+function mountStoryGenComplete(story) {
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(story.id)}"]`
+  );
+  if (!card) return;
+
+  clearStoryGenCompleteUi(story.id);
+  card.querySelector(".story-gen-progress")?.remove();
+
+  const statusEl = card.querySelector(".story-status");
+  if (statusEl?.dataset.genHidden) {
+    statusEl.hidden = false;
+    statusEl.removeAttribute("data-gen-hidden");
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "story-gen-complete gen-status is-complete";
+  wrap.setAttribute("role", "status");
+  const textEl = document.createElement("p");
+  textEl.className = "gen-status-text";
+  textEl.textContent = "✓ 완성됐어요";
+  wrap.append(textEl);
+  if (statusEl) {
+    statusEl.insertAdjacentElement("afterend", wrap);
+  } else {
+    card.querySelector(".story-actions")?.insertAdjacentElement("beforebegin", wrap);
+  }
+
+  card.classList.add("is-gen-complete");
+
+  const timer = window.setTimeout(() => {
+    wrap.remove();
+    card.classList.remove("is-gen-complete");
+    genCompleteCardTimers.delete(story.id);
+    if (statusEl && !statusEl.hidden) {
+      const keepStatus =
+        activeId === story.id && (!audio.paused || playLoading);
+      if (!keepStatus) {
+        statusEl.textContent = storyStatusMessage(story);
+      }
+    }
+  }, GEN_COMPLETE_CARD_MS);
+  genCompleteCardTimers.set(story.id, timer);
+}
+
+function showGenerationCompleteFeedback(storyIds) {
+  const stories = storyIds
+    .map((id) => catalog.find((s) => s.id === id))
+    .filter(Boolean);
+  if (!stories.length) return;
+  for (const story of stories) {
+    mountStoryGenComplete(story);
+  }
+  showGenCompleteToast(stories[0]);
 }
 
 function storyAudioUrl(story) {
@@ -730,6 +845,7 @@ function render() {
 
 function showNowPlaying(story) {
   nowPlayingEl.hidden = false;
+  syncGenCompleteToastOffset();
   npTitleEl.textContent = story.title;
   npArtEl.textContent = motifFor(story.id);
 }
@@ -937,6 +1053,7 @@ async function enqueueStory(id, asrVerify = false, assignments = null) {
     return;
   }
   showGenStatus("");
+  dismissGenCompleteToast();
   setGenCardProgress(id, 0, 1);
   startPolling();
 }
@@ -977,12 +1094,17 @@ async function pollGeneration() {
     return;
   }
   if (last?.state === "done") {
-    clearGenCardProgress();
+    const storyIds = storyIdsFromRecentJob(last);
+    genCardState = null;
+    document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
+    document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
+      el.hidden = false;
+      el.removeAttribute("data-gen-hidden");
+    });
     audioCacheBust = Date.now();
-    showGenStatus("새 목소리로 만들었어요.");
     await applyGenerationDone(last);
+    showGenerationCompleteFeedback(storyIds);
     stopPolling();
-    setTimeout(() => showGenStatus(""), 4000);
     return;
   }
   stopPolling();
