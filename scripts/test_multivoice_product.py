@@ -79,6 +79,110 @@ def test_member_plan_multivoice_vs_single() -> None:
         assert len(plan_multi.slot_refs) >= 2
 
 
+def test_multivoice_generation_job_chunk_progress() -> None:
+    import time
+
+    from generation_backends import FakeGenerationBackend
+    from generation_service import GenerationService, JobState
+    from role_assignments import NARRATOR_ROLE_KEY, save_assignment
+
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["STORY_VOICE_USERS_DIR"] = tmp
+        uid = 14
+        _write_slot(uid, 1)
+        _write_slot(uid, 2)
+        save_assignment(
+            uid,
+            "geum-dokki-eun-dokki",
+            {NARRATOR_ROLE_KEY: 1, "나무꾼": 2, "산신령": 1},
+        )
+        backend = FakeGenerationBackend(chunk_delay=0.04)
+        svc = GenerationService(backend=backend)
+        job = svc.enqueue_story("geum-dokki-eun-dokki", uid, is_admin=True).job
+
+        saw_positive_total = False
+        saw_index_increase = False
+        prev_index = 0
+        deadline = time.time() + 45.0
+        while time.time() < deadline:
+            live = svc._get_job(job.job_id)
+            assert live is not None
+            if live.chunk_total > 0:
+                saw_positive_total = True
+            if live.chunk_index > prev_index:
+                saw_index_increase = True
+                prev_index = live.chunk_index
+            if live.state == JobState.DONE:
+                break
+            if live.state == JobState.FAILED:
+                raise AssertionError(live.error)
+            time.sleep(0.01)
+        else:
+            raise AssertionError("multivoice generation job timed out")
+
+        assert saw_positive_total, "chunkTotal stayed 0 during run"
+        assert saw_index_increase, "chunkIndex never increased during run"
+
+
+def test_mlx_multivoice_passes_on_chunk() -> None:
+    from unittest.mock import MagicMock
+
+    from generation_backends import MLXGenerationBackend
+    from role_assignments import NARRATOR_ROLE_KEY, save_assignment
+
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["STORY_VOICE_USERS_DIR"] = tmp
+        uid = 15
+        _write_slot(uid, 1)
+        _write_slot(uid, 2)
+        save_assignment(
+            uid,
+            "geum-dokki-eun-dokki",
+            {NARRATOR_ROLE_KEY: 1, "나무꾼": 2, "산신령": 1},
+        )
+        from member_generation import build_member_generation_plan
+
+        plan = build_member_generation_plan(uid, "geum-dokki-eun-dokki")
+        assert plan.multivoice
+
+        captured: list[tuple[int, int]] = []
+
+        def fake_narrate(_markup, out_path, _resolve, _model, *, on_chunk=None, **kwargs):
+            assert on_chunk is not None, "multivoice narrate must receive on_chunk"
+            on_chunk(1, 99)
+            on_chunk(2, 99)
+            out_path.write_bytes(b"RIFF")
+
+        import story_multivoice
+
+        original = story_multivoice.narrate_story_multivoice
+        story_multivoice.narrate_story_multivoice = fake_narrate
+        try:
+            backend = MLXGenerationBackend()
+            fake_gen = MagicMock()
+            fake_gen.max_chars = 120
+            fake_gen.sentence_pause = 0.35
+            fake_gen.paragraph_pause = 0.75
+            fake_gen.temperature = None
+            fake_gen.dialogue_style = True
+            fake_gen.narration_config.verify_asr = False
+            fake_gen.model = object()
+            backend._generator = fake_gen
+
+            out = Path(tmp) / "out.m4a"
+
+            def on_progress(current: int, total: int, _sid: str) -> None:
+                captured.append((current, total))
+
+            backend.generate_member_story(plan, "ignored", out, on_progress)
+        finally:
+            story_multivoice.narrate_story_multivoice = original
+
+        assert captured[0][1] > 0, "chunk total should be set before chunks finish"
+        assert captured[0] == (0, captured[0][1])
+        assert any(c > 0 for c, _ in captured)
+
+
 def test_fake_backend_chunk_slot_consistency() -> None:
     from generation_backends import FakeGenerationBackend
     from member_generation import build_member_generation_plan
@@ -134,6 +238,8 @@ def main() -> int:
     test_role_assignment_validation_and_fallback()
     test_stale_assignment_invalidated()
     test_member_plan_multivoice_vs_single()
+    test_multivoice_generation_job_chunk_progress()
+    test_mlx_multivoice_passes_on_chunk()
     test_fake_backend_chunk_slot_consistency()
     test_atomic_overwrite_pattern()
     print("OK: multivoice product tests")

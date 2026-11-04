@@ -253,6 +253,7 @@ class MLXGenerationBackend(GenerationBackend):
         def on_chunk(current: int, _total: int) -> None:
             on_progress(current, total, plan.story_id)
 
+        on_progress(0, total, plan.story_id)
         active_model = generator.model
         narrate_story_multivoice(
             plan.markup_body,
@@ -266,6 +267,7 @@ class MLXGenerationBackend(GenerationBackend):
             dialogue_style=generator.dialogue_style,
             narration_config=generator.narration_config,
             tts_session=session,
+            on_chunk=on_chunk,
         )
         on_progress(total, total, plan.story_id)
 

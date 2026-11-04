@@ -100,6 +100,7 @@ def narrate_story_multivoice(
     dialogue_style: bool = True,
     narration_config=None,
     tts_session=None,
+    on_chunk: Callable[[int, int], None] | None = None,
 ) -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
     from audio_post import apply_final_loudnorm_if_enabled, encode_story_from_wav
@@ -150,6 +151,7 @@ def narrate_story_multivoice(
             temperature,
             dialogue_style=dialogue_style,
             voice_label_for_index=_voice_label,
+            on_chunk=on_chunk,
         )
         chunk_paths = [Path(p) for p in _files]
         t_asr = 0.0
