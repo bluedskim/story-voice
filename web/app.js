@@ -223,6 +223,13 @@ function genProgressPercent(chunkIndex, chunkTotal) {
   return Math.min(100, Math.round((current / total) * 100));
 }
 
+function genProgressStatusText(chunkIndex, chunkTotal) {
+  if (chunkTotal > 0) {
+    return `만드는 중 · ${chunkIndex}/${chunkTotal}`;
+  }
+  return "만드는 중";
+}
+
 function clearGenCardProgress() {
   genCardState = null;
   document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
@@ -230,10 +237,7 @@ function clearGenCardProgress() {
 }
 
 function mountStoryGenProgress(card, state) {
-  const { storyId, chunkIndex, chunkTotal } = state;
-  const title = storyTitleForId(storyId);
-  const chunk =
-    chunkTotal > 0 ? ` · ${chunkIndex}/${chunkTotal}번째` : "";
+  const { chunkIndex, chunkTotal } = state;
   const statusEl = card.querySelector(".story-status");
   if (statusEl && !statusEl.hidden) {
     statusEl.hidden = true;
@@ -258,7 +262,10 @@ function mountStoryGenProgress(card, state) {
       card.querySelector(".story-actions")?.insertAdjacentElement("beforebegin", wrap);
     }
   }
-  wrap.querySelector(".gen-status-text").textContent = `만드는 중: ${title}${chunk}`;
+  wrap.querySelector(".gen-status-text").textContent = genProgressStatusText(
+    chunkIndex,
+    chunkTotal
+  );
   wrap.querySelector(".gen-progress-bar").style.width = `${genProgressPercent(chunkIndex, chunkTotal)}%`;
 }
 
@@ -283,11 +290,8 @@ function syncGenCardProgressUi() {
     mountStoryGenProgress(card, genCardState);
     return;
   }
-  const { storyId, chunkIndex, chunkTotal } = genCardState;
-  const title = storyTitleForId(storyId);
-  const chunk =
-    chunkTotal > 0 ? ` · ${chunkIndex}/${chunkTotal}번째` : "";
-  showGenStatus(`만드는 중: ${title}${chunk}`, false);
+  const { chunkIndex, chunkTotal } = genCardState;
+  showGenStatus(genProgressStatusText(chunkIndex, chunkTotal), false);
 }
 
 function setGenCardProgress(storyId, chunkIndex, chunkTotal) {
@@ -1077,7 +1081,7 @@ async function enqueueStory(id, asrVerify = false, assignments = null) {
   if (data.job) markGenerationJobObserved(data.job);
   showGenStatus("");
   dismissGenCompleteToast();
-  setGenCardProgress(id, 0, 1);
+  setGenCardProgress(id, 0, 0);
   startPolling();
 }
 
@@ -1099,7 +1103,7 @@ async function pollGeneration() {
     setGenCardProgress(
       running.currentStoryId,
       running.chunkIndex || 0,
-      running.chunkTotal || 1
+      running.chunkTotal || 0
     );
     ensureGenerationPolling();
     return;
