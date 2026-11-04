@@ -53,9 +53,15 @@ def test_generation_progress_on_story_card() -> None:
     assert "setGenCardProgress" in APP_JS
     assert "syncGenCardProgressUi" in APP_JS
     assert "running.chunkIndex || 0" in APP_JS
-    assert "running.chunkTotal || 1" in APP_JS
+    assert "running.chunkTotal || 0" in APP_JS
     assert "genProgressPercent" in APP_JS
-    assert "만드는 중:" in APP_JS
+    assert "genProgressStatusText" in APP_JS
+    assert "만드는 중 · ${chunkIndex}/${chunkTotal}" in APP_JS
+    assert "만드는 중:" not in APP_JS
+    assert "번째" not in APP_JS
+    assert "storyTitleForId(storyId)" not in APP_JS.split("function mountStoryGenProgress")[1].split(
+        "function syncGenCardProgressUi"
+    )[0]
     assert "clearGenCardProgress" in APP_JS
 
 
