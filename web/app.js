@@ -90,6 +90,17 @@ let activeId = null;
 let activeStory = null;
 let audioCacheBust = Date.now();
 let pollTimer = null;
+let lastHandledGenerationJobId = null;
+/** @type {Set<string>} */
+const observedGenerationJobIds = new Set();
+
+function markGenerationJobObserved(job) {
+  if (job?.jobId) observedGenerationJobIds.add(job.jobId);
+}
+
+function generationJobWasObserved(jobId) {
+  return Boolean(jobId && observedGenerationJobIds.has(jobId));
+}
 let durationCache = {};
 let generationBusy = false;
 /** @type {{ storyId: string, chunkIndex: number, chunkTotal: number } | null} */
@@ -171,9 +182,35 @@ function playIcon(playing) {
   return playing ? "⏸" : "▶";
 }
 
-function setStatus(card, message) {
+function applyStoryStatus(card, message) {
   const el = card.querySelector(".story-status");
-  if (el) el.textContent = message;
+  if (!el) return;
+  if (message) {
+    el.textContent = message;
+    el.hidden = false;
+  } else {
+    el.textContent = "";
+    el.hidden = true;
+  }
+}
+
+function restoreStoryStatus(card) {
+  if (!card) return;
+  const story = catalog.find((s) => s.id === card.dataset.id);
+  applyStoryStatus(card, story ? storyStatusMessage(story) : "");
+}
+
+function setStatus(card, message) {
+  applyStoryStatus(card, message);
+}
+
+function unhideGenStoryStatuses() {
+  document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
+    el.removeAttribute("data-gen-hidden");
+    const card = el.closest(".story-card");
+    if (card) restoreStoryStatus(card);
+    else el.hidden = false;
+  });
 }
 
 function storyTitleForId(id) {
@@ -189,10 +226,7 @@ function genProgressPercent(chunkIndex, chunkTotal) {
 function clearGenCardProgress() {
   genCardState = null;
   document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
-  document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
-    el.hidden = false;
-    el.removeAttribute("data-gen-hidden");
-  });
+  unhideGenStoryStatuses();
 }
 
 function mountStoryGenProgress(card, state) {
@@ -236,10 +270,7 @@ function syncGenCardProgressUi() {
     }
   });
   if (!genCardState) {
-    document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
-      el.hidden = false;
-      el.removeAttribute("data-gen-hidden");
-    });
+    unhideGenStoryStatuses();
     return;
   }
   const card = document.querySelector(
@@ -275,7 +306,7 @@ function storyStatusMessage(story) {
     return "기본 낭독을 준비하는 중이에요. 잠시만 기다려 주세요.";
   }
   if (story.audioSource === "personal") {
-    return "내 목소리로 재생할 준비됐어요";
+    return "";
   }
   return "기본 낭독으로 들을 수 있어요. 내 목소리는 목소리 탭에서 저장 후 만들 수 있어요.";
 }
@@ -309,8 +340,8 @@ function patchStoryCardInPlace(story) {
   const statusEl = card.querySelector(".story-status");
   const keepStatus =
     activeId === story.id && (!audio.paused || playLoading);
-  if (statusEl && !statusEl.hidden && !keepStatus) {
-    statusEl.textContent = storyStatusMessage(story);
+  if (statusEl && !statusEl.dataset.genHidden && !keepStatus) {
+    applyStoryStatus(card, storyStatusMessage(story));
   }
 
   const playBtn = card.querySelector(".play-btn");
@@ -327,18 +358,7 @@ function patchStoryCardInPlace(story) {
     regenBtn.textContent = regenButtonLabel(story);
   }
 
-  const actions = card.querySelector(".story-actions");
-  if (actions && story.hasAudio && story.audioUrl) {
-    let download = actions.querySelector("a.regen-btn");
-    if (!download) {
-      download = document.createElement("a");
-      download.className = "btn btn-secondary regen-btn";
-      download.textContent = "다운로드";
-      actions.append(download);
-    }
-    download.href = `${story.audioUrl.split("?")[0]}?download=1`;
-    download.setAttribute("aria-label", `${story.title} 오디오 다운로드`);
-  }
+  card.querySelector(".story-actions a.regen-btn")?.remove();
 
   if (activeId === story.id) {
     activeStory = story;
@@ -476,11 +496,11 @@ function mountStoryGenComplete(story) {
     wrap.remove();
     card.classList.remove("is-gen-complete");
     genCompleteCardTimers.delete(story.id);
-    if (statusEl && !statusEl.hidden) {
+    if (statusEl && !statusEl.dataset.genHidden) {
       const keepStatus =
         activeId === story.id && (!audio.paused || playLoading);
       if (!keepStatus) {
-        statusEl.textContent = storyStatusMessage(story);
+        applyStoryStatus(card, storyStatusMessage(story));
       }
     }
   }, GEN_COMPLETE_CARD_MS);
@@ -779,7 +799,12 @@ function render() {
 
     const status = document.createElement("p");
     status.className = "story-status";
-    status.textContent = storyStatusMessage(story);
+    const statusMsg = storyStatusMessage(story);
+    if (statusMsg) {
+      status.textContent = statusMsg;
+    } else {
+      status.hidden = true;
+    }
 
     const regen = document.createElement("button");
     regen.type = "button";
@@ -796,15 +821,6 @@ function render() {
     const actions = document.createElement("div");
     actions.className = "story-actions";
     actions.append(regen);
-
-    if (story.hasAudio && story.audioUrl) {
-      const download = document.createElement("a");
-      download.className = "btn btn-secondary regen-btn";
-      download.href = `${story.audioUrl.split("?")[0]}?download=1`;
-      download.textContent = "다운로드";
-      download.setAttribute("aria-label", `${story.title} 오디오 다운로드`);
-      actions.append(download);
-    }
 
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -875,7 +891,10 @@ const playStarter = createBufferedStarter(audio);
 function setPlayLoading(on) {
   playLoading = on;
   const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
-  if (card && on) setStatus(card, "불러오는 중…");
+  if (card) {
+    if (on) setStatus(card, "불러오는 중…");
+    else if (audio.paused) restoreStoryStatus(card);
+  }
   syncNowPlayingUi();
 }
 
@@ -895,7 +914,7 @@ function togglePlayback(story, card, btn) {
     playLoading = false;
     audio.pause();
     card.classList.remove("is-active");
-    setStatus(card, "일시정지");
+    restoreStoryStatus(card);
     syncNowPlayingUi();
     return;
   }
@@ -920,7 +939,7 @@ audio.addEventListener("timeupdate", syncNowPlayingUi);
 audio.addEventListener("playing", () => {
   if (audio.muted) return; // still priming while buffering
   const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
-  if (card) setStatus(card, "재생 중…");
+  if (card) restoreStoryStatus(card);
   npPlayBtn.classList.remove("is-buffering");
   syncNowPlayingUi();
 });
@@ -932,7 +951,7 @@ audio.addEventListener("loadedmetadata", syncNowPlayingUi);
 audio.addEventListener("ended", () => {
   const card = document.querySelector(`.story-card[data-id="${activeId}"]`);
   if (card) {
-    setStatus(card, "끝났어요.");
+    restoreStoryStatus(card);
     card.classList.remove("is-active");
   }
   syncNowPlayingUi();
@@ -940,6 +959,8 @@ audio.addEventListener("ended", () => {
 
 audio.addEventListener("pause", () => {
   if (audio.ended) return;
+  const card = activeId ? document.querySelector(`.story-card[data-id="${activeId}"]`) : null;
+  if (card && !playLoading) restoreStoryStatus(card);
   syncNowPlayingUi();
 });
 
@@ -950,6 +971,7 @@ npPlayBtn.addEventListener("click", () => {
     playStarter.cancel();
     playLoading = false;
     audio.pause();
+    if (card) restoreStoryStatus(card);
   } else if (audio.paused) {
     startActivePlayback(card);
   } else {
@@ -1052,6 +1074,7 @@ async function enqueueStory(id, asrVerify = false, assignments = null) {
     showGenerationBlockingAlert(data.error || "요청하지 못했어요.");
     return;
   }
+  if (data.job) markGenerationJobObserved(data.job);
   showGenStatus("");
   dismissGenCompleteToast();
   setGenCardProgress(id, 0, 1);
@@ -1071,39 +1094,53 @@ async function pollGeneration() {
   const data = await res.json();
   const running = data.running;
   if (running) {
+    markGenerationJobObserved(running);
     setAppBusy(true);
     setGenCardProgress(
       running.currentStoryId,
       running.chunkIndex || 0,
       running.chunkTotal || 1
     );
+    ensureGenerationPolling();
     return;
   }
   if (data.queued?.length) {
+    for (const job of data.queued) markGenerationJobObserved(job);
     setAppBusy(true);
     clearGenCardProgress();
     showGenStatus(`대기 중… (${data.queued.length}개)`, false);
+    ensureGenerationPolling();
     return;
   }
   setAppBusy(false);
   const last = data.recent?.[0];
   if (last?.state === "failed") {
     clearGenCardProgress();
-    showGenerationBlockingAlert(last.error || "실패했어요.");
+    if (!last.jobId || last.jobId !== lastHandledGenerationJobId) {
+      if (generationJobWasObserved(last.jobId)) {
+        showGenerationBlockingAlert(last.error || "실패했어요.");
+      }
+      if (last.jobId) lastHandledGenerationJobId = last.jobId;
+    }
     stopPolling();
     return;
   }
   if (last?.state === "done") {
-    const storyIds = storyIdsFromRecentJob(last);
-    genCardState = null;
-    document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
-    document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
-      el.hidden = false;
-      el.removeAttribute("data-gen-hidden");
-    });
-    audioCacheBust = Date.now();
-    await applyGenerationDone(last);
-    showGenerationCompleteFeedback(storyIds);
+    if (last.jobId && last.jobId === lastHandledGenerationJobId) {
+      stopPolling();
+      return;
+    }
+    const observed = generationJobWasObserved(last.jobId);
+    if (last.jobId) lastHandledGenerationJobId = last.jobId;
+    if (observed) {
+      const storyIds = storyIdsFromRecentJob(last);
+      genCardState = null;
+      document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
+      unhideGenStoryStatuses();
+      audioCacheBust = Date.now();
+      await applyGenerationDone(last);
+      showGenerationCompleteFeedback(storyIds);
+    }
     stopPolling();
     return;
   }
@@ -1112,10 +1149,14 @@ async function pollGeneration() {
   showGenStatus("");
 }
 
-function startPolling() {
+function ensureGenerationPolling() {
   if (pollTimer) return;
   pollTimer = setInterval(pollGeneration, 1500);
-  pollGeneration();
+}
+
+function startPolling() {
+  ensureGenerationPolling();
+  void pollGeneration();
 }
 
 function stopPolling() {
@@ -1125,6 +1166,14 @@ function stopPolling() {
   }
   setAppBusy(false);
 }
+
+function resumeGenerationPollingOnVisible() {
+  if (document.visibilityState !== "visible") return;
+  ensureGenerationPolling();
+  void pollGeneration();
+}
+
+document.addEventListener("visibilitychange", resumeGenerationPollingOnVisible);
 
 function setupTabs() {
   document.querySelectorAll(".tab").forEach((tab) => {
@@ -1485,4 +1534,4 @@ setVoiceStep(1);
 syncVoiceSections();
 loadConfig().catch(() => {});
 loadCatalog();
-pollGeneration();
+startPolling();

@@ -97,6 +97,93 @@ def test_generation_done_completion_notice() -> None:
     assert "새 목소리로 만들었어요" not in done_block.group(1)
 
 
+def test_story_card_status_copy() -> None:
+    personal_branch = re.search(
+        r'if \(story\.audioSource === "personal"\)\s*\{[^}]+\}',
+        APP_JS,
+    )
+    assert personal_branch, "storyStatusMessage personal branch missing"
+    assert "내 목소리로 재생할 준비됐어요" not in APP_JS
+    assert 'return ""' in personal_branch.group(0)
+    assert "기본 낭독을 준비하는 중이에요" in APP_JS
+    assert "기본 낭독으로 들을 수 있어요" in APP_JS
+    assert "applyStoryStatus" in APP_JS
+    assert "restoreStoryStatus" in APP_JS
+    assert 'setStatus(card, "재생 중…")' not in APP_JS
+    assert 'setStatus(card, "일시정지")' not in APP_JS
+    assert 'setStatus(card, "끝났어요.")' not in APP_JS
+    assert "불러오는 중…" in APP_JS
+    assert "재생할 수 없어요" in APP_JS
+
+
+def test_story_card_has_no_download_button() -> None:
+    assert "다운로드" not in APP_JS
+    assert "?download=1" not in APP_JS
+    assert "내 목소리로 다시 만들기" in APP_JS
+    assert "내 목소리로 만들기" in APP_JS
+
+
+def test_generation_polling_resumes_while_job_active() -> None:
+    assert re.search(r"loadCatalog\(\);\s*\nstartPolling\(\);", APP_JS)
+    assert re.search(
+        r"loadCatalog\(\);\s*\npollGeneration\(\);",
+        APP_JS,
+    ) is None
+    poll_body = re.search(
+        r"async function pollGeneration\(\)\s*\{(.+?)}\n\nfunction ensureGenerationPolling",
+        APP_JS,
+        re.S,
+    )
+    assert poll_body, "pollGeneration block missing"
+    body = poll_body.group(1)
+    running = re.search(r"if \(running\)\s*\{(.+?)\n  \}", body, re.S)
+    assert running and "ensureGenerationPolling()" in running.group(1)
+    queued = re.search(r"if \(data\.queued\?\.length\)\s*\{(.+?)\n  \}", body, re.S)
+    assert queued and "ensureGenerationPolling()" in queued.group(1)
+    assert "function ensureGenerationPolling()" in APP_JS
+    assert "visibilitychange" in APP_JS
+    assert "resumeGenerationPollingOnVisible" in APP_JS
+    assert "lastHandledGenerationJobId" in APP_JS
+    done_block = re.search(
+        r'if \(last\?\.state === "done"\)\s*\{(.+?)\n  \}',
+        body,
+        re.S,
+    )
+    assert done_block
+    assert "generationJobWasObserved" in done_block.group(1)
+    assert "lastHandledGenerationJobId" in done_block.group(1)
+
+
+def test_generation_completion_only_if_job_was_observed_active() -> None:
+    assert "observedGenerationJobIds" in APP_JS
+    assert "markGenerationJobObserved" in APP_JS
+    assert "generationJobWasObserved" in APP_JS
+    poll_body = re.search(
+        r"async function pollGeneration\(\)\s*\{(.+?)}\n\nfunction ensureGenerationPolling",
+        APP_JS,
+        re.S,
+    )
+    assert poll_body
+    body = poll_body.group(1)
+    running = re.search(r"if \(running\)\s*\{(.+?)\n  \}", body, re.S)
+    assert running and "markGenerationJobObserved(running)" in running.group(1)
+    queued = re.search(r"if \(data\.queued\?\.length\)\s*\{(.+?)\n  \}", body, re.S)
+    assert queued and "markGenerationJobObserved(job)" in queued.group(1)
+    done = re.search(r'if \(last\?\.state === "done"\)\s*\{(.+?)\n  \}', body, re.S)
+    assert done
+    done_body = done.group(1)
+    assert re.search(
+        r"if \(observed\)\s*\{[^}]*applyGenerationDone",
+        done_body,
+        re.S,
+    )
+    assert "showGenerationCompleteFeedback" in done_body
+    failed = re.search(r'if \(last\?\.state === "failed"\)\s*\{(.+?)\n  \}', body, re.S)
+    assert failed
+    assert "generationJobWasObserved(last.jobId)" in failed.group(1)
+    assert "markGenerationJobObserved(data.job)" in APP_JS
+
+
 if __name__ == "__main__":
     test_stories_tab_has_no_always_visible_asr_checkbox()
     test_generation_confirm_modal_copy()
@@ -104,4 +191,8 @@ if __name__ == "__main__":
     test_generation_progress_on_story_card()
     test_generation_done_updates_story_card_in_place()
     test_generation_done_completion_notice()
+    test_story_card_status_copy()
+    test_story_card_has_no_download_button()
+    test_generation_polling_resumes_while_job_active()
+    test_generation_completion_only_if_job_was_observed_active()
     print("ok")
