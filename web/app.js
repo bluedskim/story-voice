@@ -15,8 +15,6 @@ const voiceAuthGateEl = document.getElementById("voice-auth-gate");
 const audio = document.getElementById("player");
 const genStatusEl = document.getElementById("gen-status");
 const genStatusTextEl = document.getElementById("gen-status-text");
-const genProgressEl = document.getElementById("gen-progress");
-const genProgressBarEl = document.getElementById("gen-progress-bar");
 const genConfirmModal = document.getElementById("modal-gen-confirm");
 const genConfirmStoryEl = document.getElementById("gen-confirm-story");
 const genConfirmAsrVerifyEl = document.getElementById("gen-confirm-asr-verify");
@@ -91,6 +89,8 @@ let audioCacheBust = Date.now();
 let pollTimer = null;
 let durationCache = {};
 let generationBusy = false;
+/** @type {{ storyId: string, chunkIndex: number, chunkTotal: number } | null} */
+let genCardState = null;
 let seekDragging = false;
 let playLoading = false;
 let previewSeekDragging = false;
@@ -166,6 +166,94 @@ function playIcon(playing) {
 function setStatus(card, message) {
   const el = card.querySelector(".story-status");
   if (el) el.textContent = message;
+}
+
+function storyTitleForId(id) {
+  return catalog.find((s) => s.id === id)?.title || id || "이야기";
+}
+
+function genProgressPercent(chunkIndex, chunkTotal) {
+  const total = chunkTotal || 1;
+  const current = chunkIndex || 0;
+  return Math.min(100, Math.round((current / total) * 100));
+}
+
+function clearGenCardProgress() {
+  genCardState = null;
+  document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
+  document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
+    el.hidden = false;
+    el.removeAttribute("data-gen-hidden");
+  });
+}
+
+function mountStoryGenProgress(card, state) {
+  const { storyId, chunkIndex, chunkTotal } = state;
+  const title = storyTitleForId(storyId);
+  const chunk =
+    chunkTotal > 0 ? ` · ${chunkIndex}/${chunkTotal}번째` : "";
+  const statusEl = card.querySelector(".story-status");
+  if (statusEl && !statusEl.hidden) {
+    statusEl.hidden = true;
+    statusEl.dataset.genHidden = "1";
+  }
+  let wrap = card.querySelector(".story-gen-progress");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.className = "story-gen-progress gen-status is-busy";
+    wrap.setAttribute("role", "status");
+    const textEl = document.createElement("p");
+    textEl.className = "gen-status-text";
+    const progEl = document.createElement("div");
+    progEl.className = "gen-progress";
+    const barEl = document.createElement("div");
+    barEl.className = "gen-progress-bar";
+    progEl.appendChild(barEl);
+    wrap.append(textEl, progEl);
+    if (statusEl) {
+      statusEl.insertAdjacentElement("afterend", wrap);
+    } else {
+      card.querySelector(".story-actions")?.insertAdjacentElement("beforebegin", wrap);
+    }
+  }
+  wrap.querySelector(".gen-status-text").textContent = `만드는 중: ${title}${chunk}`;
+  wrap.querySelector(".gen-progress-bar").style.width = `${genProgressPercent(chunkIndex, chunkTotal)}%`;
+}
+
+function syncGenCardProgressUi() {
+  document.querySelectorAll(".story-gen-progress").forEach((el) => {
+    const card = el.closest(".story-card");
+    if (!genCardState || !card || card.dataset.id !== genCardState.storyId) {
+      el.remove();
+    }
+  });
+  if (!genCardState) {
+    document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
+      el.hidden = false;
+      el.removeAttribute("data-gen-hidden");
+    });
+    return;
+  }
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(genCardState.storyId)}"]`
+  );
+  if (card) {
+    genStatusEl.hidden = true;
+    genStatusTextEl.textContent = "";
+    genStatusEl.classList.remove("is-busy");
+    mountStoryGenProgress(card, genCardState);
+    return;
+  }
+  const { storyId, chunkIndex, chunkTotal } = genCardState;
+  const title = storyTitleForId(storyId);
+  const chunk =
+    chunkTotal > 0 ? ` · ${chunkIndex}/${chunkTotal}번째` : "";
+  showGenStatus(`만드는 중: ${title}${chunk}`, false);
+}
+
+function setGenCardProgress(storyId, chunkIndex, chunkTotal) {
+  genCardState = { storyId, chunkIndex, chunkTotal };
+  syncGenCardProgressUi();
 }
 
 function storyAudioUrl(story) {
@@ -523,6 +611,7 @@ function render() {
     listEl.appendChild(card);
   }
   syncNowPlayingUi();
+  syncGenCardProgressUi();
 }
 
 function showNowPlaying(story) {
@@ -733,23 +822,16 @@ async function enqueueStory(id, asrVerify = false, assignments = null) {
     showGenerationBlockingAlert(data.error || "요청하지 못했어요.");
     return;
   }
-  showGenStatus("이야기를 만드는 중…");
+  showGenStatus("");
+  setGenCardProgress(id, 0, 1);
   startPolling();
 }
 
-function showGenStatus(text, isError = false, progress = null) {
+function showGenStatus(text, isError = false) {
   genStatusEl.hidden = !text;
   genStatusTextEl.textContent = text;
   genStatusEl.classList.toggle("is-error", isError);
-  genStatusEl.classList.toggle("is-busy", Boolean(progress));
-  if (progress && progress.total > 0) {
-    genProgressEl.hidden = false;
-    const pct = Math.min(100, Math.round((progress.current / progress.total) * 100));
-    genProgressBarEl.style.width = `${pct}%`;
-  } else {
-    genProgressEl.hidden = true;
-    genProgressBarEl.style.width = "0%";
-  }
+  genStatusEl.classList.toggle("is-busy", false);
 }
 
 async function pollGeneration() {
@@ -759,31 +841,29 @@ async function pollGeneration() {
   const running = data.running;
   if (running) {
     setAppBusy(true);
-    const chunk =
-      running.chunkTotal > 0
-        ? ` · ${running.chunkIndex}/${running.chunkTotal}번째`
-        : "";
-    const title =
-      catalog.find((s) => s.id === running.currentStoryId)?.title || running.currentStoryId;
-    showGenStatus(`만드는 중: ${title || "이야기"}${chunk}`, false, {
-      current: running.chunkIndex || 0,
-      total: running.chunkTotal || 1,
-    });
+    setGenCardProgress(
+      running.currentStoryId,
+      running.chunkIndex || 0,
+      running.chunkTotal || 1
+    );
     return;
   }
   if (data.queued?.length) {
     setAppBusy(true);
+    clearGenCardProgress();
     showGenStatus(`대기 중… (${data.queued.length}개)`, false);
     return;
   }
   setAppBusy(false);
   const last = data.recent?.[0];
   if (last?.state === "failed") {
+    clearGenCardProgress();
     showGenerationBlockingAlert(last.error || "실패했어요.");
     stopPolling();
     return;
   }
   if (last?.state === "done") {
+    clearGenCardProgress();
     audioCacheBust = Date.now();
     showGenStatus("새 목소리로 만들었어요.");
     await loadCatalog();
@@ -792,6 +872,7 @@ async function pollGeneration() {
     return;
   }
   stopPolling();
+  clearGenCardProgress();
   showGenStatus("");
 }
 

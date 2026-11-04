@@ -465,6 +465,11 @@ body {
   color: var(--text-soft);
 }
 
+.story-gen-progress {
+  margin: 0.35rem 0 0;
+  padding: 0.65rem 0.75rem;
+}
+
 .play-btn {
   grid-column: 1;
   grid-row: 1 / span 2;
