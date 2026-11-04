@@ -59,9 +59,26 @@ def test_generation_progress_on_story_card() -> None:
     assert "clearGenCardProgress" in APP_JS
 
 
+def test_generation_done_updates_story_card_in_place() -> None:
+    assert "patchStoryCardInPlace" in APP_JS
+    assert "applyGenerationDone" in APP_JS
+    assert "storyIdsFromRecentJob" in APP_JS
+    done_block = re.search(
+        r'if \(last\?\.state === "done"\)\s*\{(.+?)\n  \}',
+        APP_JS,
+        re.S,
+    )
+    assert done_block, "pollGeneration done branch missing"
+    body = done_block.group(1)
+    assert "await applyGenerationDone(last)" in body
+    assert "await loadCatalog()" not in body
+    assert "loadCatalog({ showLoading: false })" in APP_JS
+
+
 if __name__ == "__main__":
     test_stories_tab_has_no_always_visible_asr_checkbox()
     test_generation_confirm_modal_copy()
     test_app_opens_modal_and_sends_asr_verify()
     test_generation_progress_on_story_card()
+    test_generation_done_updates_story_card_in_place()
     print("ok")
