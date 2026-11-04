@@ -347,18 +347,7 @@ function patchStoryCardInPlace(story) {
     regenBtn.textContent = regenButtonLabel(story);
   }
 
-  const actions = card.querySelector(".story-actions");
-  if (actions && story.hasAudio && story.audioUrl) {
-    let download = actions.querySelector("a.regen-btn");
-    if (!download) {
-      download = document.createElement("a");
-      download.className = "btn btn-secondary regen-btn";
-      download.textContent = "다운로드";
-      actions.append(download);
-    }
-    download.href = `${story.audioUrl.split("?")[0]}?download=1`;
-    download.setAttribute("aria-label", `${story.title} 오디오 다운로드`);
-  }
+  card.querySelector(".story-actions a.regen-btn")?.remove();
 
   if (activeId === story.id) {
     activeStory = story;
@@ -821,15 +810,6 @@ function render() {
     const actions = document.createElement("div");
     actions.className = "story-actions";
     actions.append(regen);
-
-    if (story.hasAudio && story.audioUrl) {
-      const download = document.createElement("a");
-      download.className = "btn btn-secondary regen-btn";
-      download.href = `${story.audioUrl.split("?")[0]}?download=1`;
-      download.textContent = "다운로드";
-      download.setAttribute("aria-label", `${story.title} 오디오 다운로드`);
-      actions.append(download);
-    }
 
     const toggle = document.createElement("button");
     toggle.type = "button";

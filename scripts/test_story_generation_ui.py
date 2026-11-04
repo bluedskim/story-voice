@@ -116,6 +116,13 @@ def test_story_card_status_copy() -> None:
     assert "재생할 수 없어요" in APP_JS
 
 
+def test_story_card_has_no_download_button() -> None:
+    assert "다운로드" not in APP_JS
+    assert "?download=1" not in APP_JS
+    assert "내 목소리로 다시 만들기" in APP_JS
+    assert "내 목소리로 만들기" in APP_JS
+
+
 if __name__ == "__main__":
     test_stories_tab_has_no_always_visible_asr_checkbox()
     test_generation_confirm_modal_copy()
@@ -124,4 +131,5 @@ if __name__ == "__main__":
     test_generation_done_updates_story_card_in_place()
     test_generation_done_completion_notice()
     test_story_card_status_copy()
+    test_story_card_has_no_download_button()
     print("ok")
