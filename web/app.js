@@ -91,6 +91,16 @@ let activeStory = null;
 let audioCacheBust = Date.now();
 let pollTimer = null;
 let lastHandledGenerationJobId = null;
+/** @type {Set<string>} */
+const observedGenerationJobIds = new Set();
+
+function markGenerationJobObserved(job) {
+  if (job?.jobId) observedGenerationJobIds.add(job.jobId);
+}
+
+function generationJobWasObserved(jobId) {
+  return Boolean(jobId && observedGenerationJobIds.has(jobId));
+}
 let durationCache = {};
 let generationBusy = false;
 /** @type {{ storyId: string, chunkIndex: number, chunkTotal: number } | null} */
@@ -1064,6 +1074,7 @@ async function enqueueStory(id, asrVerify = false, assignments = null) {
     showGenerationBlockingAlert(data.error || "요청하지 못했어요.");
     return;
   }
+  if (data.job) markGenerationJobObserved(data.job);
   showGenStatus("");
   dismissGenCompleteToast();
   setGenCardProgress(id, 0, 1);
@@ -1083,6 +1094,7 @@ async function pollGeneration() {
   const data = await res.json();
   const running = data.running;
   if (running) {
+    markGenerationJobObserved(running);
     setAppBusy(true);
     setGenCardProgress(
       running.currentStoryId,
@@ -1093,6 +1105,7 @@ async function pollGeneration() {
     return;
   }
   if (data.queued?.length) {
+    for (const job of data.queued) markGenerationJobObserved(job);
     setAppBusy(true);
     clearGenCardProgress();
     showGenStatus(`대기 중… (${data.queued.length}개)`, false);
@@ -1104,8 +1117,10 @@ async function pollGeneration() {
   if (last?.state === "failed") {
     clearGenCardProgress();
     if (!last.jobId || last.jobId !== lastHandledGenerationJobId) {
+      if (generationJobWasObserved(last.jobId)) {
+        showGenerationBlockingAlert(last.error || "실패했어요.");
+      }
       if (last.jobId) lastHandledGenerationJobId = last.jobId;
-      showGenerationBlockingAlert(last.error || "실패했어요.");
     }
     stopPolling();
     return;
@@ -1115,17 +1130,17 @@ async function pollGeneration() {
       stopPolling();
       return;
     }
+    const observed = generationJobWasObserved(last.jobId);
     if (last.jobId) lastHandledGenerationJobId = last.jobId;
-    const storyIds = storyIdsFromRecentJob(last);
-    genCardState = null;
-    document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
-    document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
-      el.hidden = false;
-      el.removeAttribute("data-gen-hidden");
-    });
-    audioCacheBust = Date.now();
-    await applyGenerationDone(last);
-    showGenerationCompleteFeedback(storyIds);
+    if (observed) {
+      const storyIds = storyIdsFromRecentJob(last);
+      genCardState = null;
+      document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
+      unhideGenStoryStatuses();
+      audioCacheBust = Date.now();
+      await applyGenerationDone(last);
+      showGenerationCompleteFeedback(storyIds);
+    }
     stopPolling();
     return;
   }

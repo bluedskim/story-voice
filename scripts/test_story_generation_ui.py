@@ -150,7 +150,38 @@ def test_generation_polling_resumes_while_job_active() -> None:
         re.S,
     )
     assert done_block
+    assert "generationJobWasObserved" in done_block.group(1)
     assert "lastHandledGenerationJobId" in done_block.group(1)
+
+
+def test_generation_completion_only_if_job_was_observed_active() -> None:
+    assert "observedGenerationJobIds" in APP_JS
+    assert "markGenerationJobObserved" in APP_JS
+    assert "generationJobWasObserved" in APP_JS
+    poll_body = re.search(
+        r"async function pollGeneration\(\)\s*\{(.+?)}\n\nfunction ensureGenerationPolling",
+        APP_JS,
+        re.S,
+    )
+    assert poll_body
+    body = poll_body.group(1)
+    running = re.search(r"if \(running\)\s*\{(.+?)\n  \}", body, re.S)
+    assert running and "markGenerationJobObserved(running)" in running.group(1)
+    queued = re.search(r"if \(data\.queued\?\.length\)\s*\{(.+?)\n  \}", body, re.S)
+    assert queued and "markGenerationJobObserved(job)" in queued.group(1)
+    done = re.search(r'if \(last\?\.state === "done"\)\s*\{(.+?)\n  \}', body, re.S)
+    assert done
+    done_body = done.group(1)
+    assert re.search(
+        r"if \(observed\)\s*\{[^}]*applyGenerationDone",
+        done_body,
+        re.S,
+    )
+    assert "showGenerationCompleteFeedback" in done_body
+    failed = re.search(r'if \(last\?\.state === "failed"\)\s*\{(.+?)\n  \}', body, re.S)
+    assert failed
+    assert "generationJobWasObserved(last.jobId)" in failed.group(1)
+    assert "markGenerationJobObserved(data.job)" in APP_JS
 
 
 if __name__ == "__main__":
@@ -163,4 +194,5 @@ if __name__ == "__main__":
     test_story_card_status_copy()
     test_story_card_has_no_download_button()
     test_generation_polling_resumes_while_job_active()
+    test_generation_completion_only_if_job_was_observed_active()
     print("ok")
