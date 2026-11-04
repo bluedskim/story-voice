@@ -15,6 +15,9 @@ const voiceAuthGateEl = document.getElementById("voice-auth-gate");
 const audio = document.getElementById("player");
 const genStatusEl = document.getElementById("gen-status");
 const genStatusTextEl = document.getElementById("gen-status-text");
+const genCompleteToastEl = document.getElementById("gen-complete-toast");
+const genCompleteToastTextEl = document.getElementById("gen-complete-toast-text");
+const genCompleteToastPlayBtn = document.getElementById("gen-complete-toast-play");
 const genConfirmModal = document.getElementById("modal-gen-confirm");
 const genConfirmStoryEl = document.getElementById("gen-confirm-story");
 const genConfirmAsrVerifyEl = document.getElementById("gen-confirm-asr-verify");
@@ -91,6 +94,11 @@ let durationCache = {};
 let generationBusy = false;
 /** @type {{ storyId: string, chunkIndex: number, chunkTotal: number } | null} */
 let genCardState = null;
+const GEN_COMPLETE_CARD_MS = 5000;
+const GEN_COMPLETE_TOAST_MS = 8000;
+/** @type {Map<string, number>} */
+const genCompleteCardTimers = new Map();
+let genCompleteToastTimer = null;
 let seekDragging = false;
 let playLoading = false;
 let previewSeekDragging = false;
@@ -254,6 +262,240 @@ function syncGenCardProgressUi() {
 function setGenCardProgress(storyId, chunkIndex, chunkTotal) {
   genCardState = { storyId, chunkIndex, chunkTotal };
   syncGenCardProgressUi();
+}
+
+function storyBadgeLabel(story) {
+  if (!story.hasAudio) return "준비 중";
+  if (story.audioSource === "personal") return "내 목소리";
+  return "기본 낭독";
+}
+
+function storyStatusMessage(story) {
+  if (!story.hasAudio) {
+    return "기본 낭독을 준비하는 중이에요. 잠시만 기다려 주세요.";
+  }
+  if (story.audioSource === "personal") {
+    return "내 목소리로 재생할 준비됐어요";
+  }
+  return "기본 낭독으로 들을 수 있어요. 내 목소리는 목소리 탭에서 저장 후 만들 수 있어요.";
+}
+
+function regenButtonLabel(story) {
+  return story.hasPersonalAudio ? "내 목소리로 다시 만들기" : "내 목소리로 만들기";
+}
+
+function storyIdsFromRecentJob(last) {
+  if (last?.storyIds?.length) return last.storyIds;
+  if (last?.currentStoryId) return [last.currentStoryId];
+  return [];
+}
+
+/** @returns {boolean} true if the card was updated in the DOM */
+function patchStoryCardInPlace(story) {
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(story.id)}"]`
+  );
+  if (!card) return false;
+
+  card.classList.toggle("is-missing", !story.hasAudio);
+  card.classList.toggle(
+    "is-default-audio",
+    Boolean(story.hasAudio && story.audioSource === "default")
+  );
+
+  const badge = card.querySelector(".story-badge");
+  if (badge) badge.textContent = storyBadgeLabel(story);
+
+  const statusEl = card.querySelector(".story-status");
+  const keepStatus =
+    activeId === story.id && (!audio.paused || playLoading);
+  if (statusEl && !statusEl.hidden && !keepStatus) {
+    statusEl.textContent = storyStatusMessage(story);
+  }
+
+  const playBtn = card.querySelector(".play-btn");
+  if (playBtn) {
+    playBtn.disabled = !story.hasAudio;
+    playBtn.setAttribute(
+      "aria-label",
+      story.hasAudio ? `${story.title} 재생` : "오디오 없음"
+    );
+  }
+
+  const regenBtn = card.querySelector(".story-actions button.regen-btn");
+  if (regenBtn) {
+    regenBtn.textContent = regenButtonLabel(story);
+  }
+
+  const actions = card.querySelector(".story-actions");
+  if (actions && story.hasAudio && story.audioUrl) {
+    let download = actions.querySelector("a.regen-btn");
+    if (!download) {
+      download = document.createElement("a");
+      download.className = "btn btn-secondary regen-btn";
+      download.textContent = "다운로드";
+      actions.append(download);
+    }
+    download.href = `${story.audioUrl.split("?")[0]}?download=1`;
+    download.setAttribute("aria-label", `${story.title} 오디오 다운로드`);
+  }
+
+  if (activeId === story.id) {
+    activeStory = story;
+    const url = storyAudioUrl(story);
+    const playing = !audio.paused || playLoading;
+    if (url && !playing) {
+      const nextSrc = new URL(url, location.href).href;
+      if (audio.src !== nextSrc) {
+        audio.src = url;
+      }
+    }
+  }
+
+  syncNowPlayingUi();
+  return true;
+}
+
+function applyPersonalGenerationToCatalog(storyId) {
+  const story = catalog.find((s) => s.id === storyId);
+  if (!story) return null;
+  story.hasAudio = true;
+  story.hasPersonalAudio = true;
+  story.audioSource = "personal";
+  if (!story.audioUrl) story.audioUrl = `/audio/${storyId}.m4a`;
+  return story;
+}
+
+async function applyGenerationDone(last) {
+  const storyIds = storyIdsFromRecentJob(last);
+  if (!storyIds.length) {
+    await loadCatalog({ showLoading: false });
+    return;
+  }
+  let needFullReload = false;
+  for (const id of storyIds) {
+    const story = applyPersonalGenerationToCatalog(id);
+    if (!story) {
+      needFullReload = true;
+      continue;
+    }
+    if (!patchStoryCardInPlace(story)) {
+      needFullReload = true;
+      continue;
+    }
+    delete durationCache[story.id];
+    probeDuration(story);
+  }
+  if (needFullReload) {
+    await loadCatalog({ showLoading: false });
+  }
+}
+
+function dismissGenCompleteToast() {
+  if (genCompleteToastTimer) {
+    clearTimeout(genCompleteToastTimer);
+    genCompleteToastTimer = null;
+  }
+  if (genCompleteToastEl) genCompleteToastEl.hidden = true;
+}
+
+function syncGenCompleteToastOffset() {
+  document.body.classList.toggle(
+    "has-now-playing",
+    Boolean(nowPlayingEl && !nowPlayingEl.hidden)
+  );
+}
+
+function playStoryFromCard(story) {
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(story.id)}"]`
+  );
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  const playBtn = card.querySelector(".play-btn");
+  if (playBtn && !playBtn.disabled) {
+    togglePlayback(story, card, playBtn);
+  }
+}
+
+function showGenCompleteToast(story) {
+  if (!genCompleteToastEl || !genCompleteToastTextEl || !genCompleteToastPlayBtn) return;
+  dismissGenCompleteToast();
+  genCompleteToastTextEl.textContent = `「${story.title}」 이야기가 완성됐어요`;
+  genCompleteToastPlayBtn.onclick = () => {
+    dismissGenCompleteToast();
+    playStoryFromCard(story);
+  };
+  syncGenCompleteToastOffset();
+  genCompleteToastEl.hidden = false;
+  genCompleteToastTimer = window.setTimeout(dismissGenCompleteToast, GEN_COMPLETE_TOAST_MS);
+}
+
+function clearStoryGenCompleteUi(storyId) {
+  const prev = genCompleteCardTimers.get(storyId);
+  if (prev) window.clearTimeout(prev);
+  genCompleteCardTimers.delete(storyId);
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(storyId)}"]`
+  );
+  card?.querySelector(".story-gen-complete")?.remove();
+  card?.classList.remove("is-gen-complete");
+}
+
+function mountStoryGenComplete(story) {
+  const card = document.querySelector(
+    `.story-card[data-id="${CSS.escape(story.id)}"]`
+  );
+  if (!card) return;
+
+  clearStoryGenCompleteUi(story.id);
+  card.querySelector(".story-gen-progress")?.remove();
+
+  const statusEl = card.querySelector(".story-status");
+  if (statusEl?.dataset.genHidden) {
+    statusEl.hidden = false;
+    statusEl.removeAttribute("data-gen-hidden");
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "story-gen-complete gen-status is-complete";
+  wrap.setAttribute("role", "status");
+  const textEl = document.createElement("p");
+  textEl.className = "gen-status-text";
+  textEl.textContent = "✓ 완성됐어요";
+  wrap.append(textEl);
+  if (statusEl) {
+    statusEl.insertAdjacentElement("afterend", wrap);
+  } else {
+    card.querySelector(".story-actions")?.insertAdjacentElement("beforebegin", wrap);
+  }
+
+  card.classList.add("is-gen-complete");
+
+  const timer = window.setTimeout(() => {
+    wrap.remove();
+    card.classList.remove("is-gen-complete");
+    genCompleteCardTimers.delete(story.id);
+    if (statusEl && !statusEl.hidden) {
+      const keepStatus =
+        activeId === story.id && (!audio.paused || playLoading);
+      if (!keepStatus) {
+        statusEl.textContent = storyStatusMessage(story);
+      }
+    }
+  }, GEN_COMPLETE_CARD_MS);
+  genCompleteCardTimers.set(story.id, timer);
+}
+
+function showGenerationCompleteFeedback(storyIds) {
+  const stories = storyIds
+    .map((id) => catalog.find((s) => s.id === id))
+    .filter(Boolean);
+  if (!stories.length) return;
+  for (const story of stories) {
+    mountStoryGenComplete(story);
+  }
+  showGenCompleteToast(stories[0]);
 }
 
 function storyAudioUrl(story) {
@@ -528,13 +770,7 @@ function render() {
     meta.className = "story-meta";
     const badge = document.createElement("span");
     badge.className = "story-badge";
-    if (!story.hasAudio) {
-      badge.textContent = "준비 중";
-    } else if (story.audioSource === "personal") {
-      badge.textContent = "내 목소리";
-    } else {
-      badge.textContent = "기본 낭독";
-    }
+    badge.textContent = storyBadgeLabel(story);
     const dur = document.createElement("span");
     dur.className = "story-duration";
     dur.dataset.id = story.id;
@@ -543,19 +779,12 @@ function render() {
 
     const status = document.createElement("p");
     status.className = "story-status";
-    if (!story.hasAudio) {
-      status.textContent = "기본 낭독을 준비하는 중이에요. 잠시만 기다려 주세요.";
-    } else if (story.audioSource === "personal") {
-      status.textContent = "내 목소리로 재생할 준비됐어요";
-    } else {
-      status.textContent = "기본 낭독으로 들을 수 있어요. 내 목소리는 목소리 탭에서 저장 후 만들 수 있어요.";
-    }
+    status.textContent = storyStatusMessage(story);
 
     const regen = document.createElement("button");
     regen.type = "button";
     regen.className = "btn btn-secondary regen-btn";
-    const personalLabel = story.hasPersonalAudio ? "내 목소리로 다시 만들기" : "내 목소리로 만들기";
-    regen.textContent = personalLabel;
+    regen.textContent = regenButtonLabel(story);
     regen.addEventListener("click", () => openGenerationConfirm(story));
     regen.disabled = generationBusy || (canWrite() && !hasPersonalVoice);
     if (!hasPersonalVoice && canWrite()) {
@@ -616,6 +845,7 @@ function render() {
 
 function showNowPlaying(story) {
   nowPlayingEl.hidden = false;
+  syncGenCompleteToastOffset();
   npTitleEl.textContent = story.title;
   npArtEl.textContent = motifFor(story.id);
 }
@@ -823,6 +1053,7 @@ async function enqueueStory(id, asrVerify = false, assignments = null) {
     return;
   }
   showGenStatus("");
+  dismissGenCompleteToast();
   setGenCardProgress(id, 0, 1);
   startPolling();
 }
@@ -863,12 +1094,17 @@ async function pollGeneration() {
     return;
   }
   if (last?.state === "done") {
-    clearGenCardProgress();
+    const storyIds = storyIdsFromRecentJob(last);
+    genCardState = null;
+    document.querySelectorAll(".story-gen-progress").forEach((el) => el.remove());
+    document.querySelectorAll(".story-status[data-gen-hidden]").forEach((el) => {
+      el.hidden = false;
+      el.removeAttribute("data-gen-hidden");
+    });
     audioCacheBust = Date.now();
-    showGenStatus("새 목소리로 만들었어요.");
-    await loadCatalog();
+    await applyGenerationDone(last);
+    showGenerationCompleteFeedback(storyIds);
     stopPolling();
-    setTimeout(() => showGenStatus(""), 4000);
     return;
   }
   stopPolling();
