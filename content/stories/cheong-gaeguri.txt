@@ -2,7 +2,7 @@
 title: 청개구리
 id: cheong-gaeguri
 order: 8
-defaultVoice: seraphina
+defaultVoice: anna
 ---
 옛날 옛적, 냇가에 엄마 개구리와 청개구리가 살았어요.
 청개구리는 엄마 말이라면 무엇이든 거꾸로만 했어요.

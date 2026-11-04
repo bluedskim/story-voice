@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-story default narrator voice (Harry / Dana / Seraphina) for shared catalog audio."""
+"""Per-story default narrator voice (Harry / Dana / Anna) for shared catalog audio."""
 
 from __future__ import annotations
 
@@ -33,15 +33,15 @@ def test_catalog_default_voices() -> None:
     expected = {
         "ui-joeun-hyeongje": "dana",
         "geum-dokki-eun-dokki": "harry",
-        "hokburi-yeonggam": "seraphina",
+        "hokburi-yeonggam": "anna",
         "horangi-wa-gotgam": "harry",
         "eunhye-gapeun-kkachi": "dana",
         "tokki-ui-gan": "harry",
         "ureong-gaksi": "dana",
-        "cheong-gaeguri": "seraphina",
+        "cheong-gaeguri": "anna",
         "gyeonu-wa-jiknyeo": "harry",
         "namukkun-gwa-seonnyeo": "dana",
-        "gae-wa-goyangi-ui-guseul": "seraphina",
+        "gae-wa-goyangi-ui-guseul": "anna",
     }
     for story in list_stories():
         assert story.default_voice == expected[story.id], story.id
@@ -72,20 +72,20 @@ def test_generation_uses_story_voice_reference() -> None:
             harry_dir.mkdir()
             (harry_dir / "reference.wav").write_bytes(b"RIFF" + b"\x01" * 40)
             (harry_dir / "reference.txt").write_text(script + "\n", encoding="utf-8")
-            seraphina_dir = dana_root / "seraphina"
-            seraphina_dir.mkdir()
-            (seraphina_dir / "reference.wav").write_bytes(b"RIFF" + b"\x02" * 40)
-            (seraphina_dir / "reference.txt").write_text(script + "\n", encoding="utf-8")
+            anna_dir = dana_root / "anna"
+            anna_dir.mkdir()
+            (anna_dir / "reference.wav").write_bytes(b"RIFF" + b"\x02" * 40)
+            (anna_dir / "reference.txt").write_text(script + "\n", encoding="utf-8")
 
             os.environ["STORY_VOICE_DEFAULT_VOICE_DIR"] = str(dana_root)
             os.environ["STORY_VOICE_DEFAULT_AUDIO_DIR"] = str(audio_dir)
 
             harry_ref, _ = ensure_default_reference_for_story("geum-dokki-eun-dokki")
             dana_ref, _ = ensure_default_reference_for_story("ui-joeun-hyeongje")
-            seraphina_ref, _ = ensure_default_reference_for_story("hokburi-yeonggam")
+            anna_ref, _ = ensure_default_reference_for_story("hokburi-yeonggam")
             assert dana_ref.parent == dana_root
             assert harry_ref == harry_dir / "reference.wav"
-            assert seraphina_ref == seraphina_dir / "reference.wav"
+            assert anna_ref == anna_dir / "reference.wav"
 
             backend = FakeGenerationBackend(chunk_delay=0)
             svc = GenerationService(backend=backend)
@@ -126,7 +126,7 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
             (dana_root / "reference.wav").write_bytes(b"RIFF" + b"\x00" * 40)
             (dana_root / "reference.txt").write_text(script + "\n", encoding="utf-8")
 
-            # Do not rely on gitignored production refs under data/voice/{harry,seraphina}/.
+            # Do not rely on gitignored production refs under data/voice/{harry,anna}/.
             LOCAL_ONLY_VOICES[voice] = LocalOnlyVoicePaths(
                 subdir=prior_paths.subdir,
                 local_wav=tmp_path / "isolated_local" / voice / "reference.wav",
@@ -176,18 +176,18 @@ def test_harry_missing_skips_without_dana_fallback() -> None:
     test_local_only_missing_skips_without_dana_fallback("harry", "geum-dokki-eun-dokki")
 
 
-def test_seraphina_missing_skips_without_dana_fallback() -> None:
-    test_local_only_missing_skips_without_dana_fallback("seraphina", "hokburi-yeonggam")
+def test_anna_missing_skips_without_dana_fallback() -> None:
+    test_local_only_missing_skips_without_dana_fallback("anna", "hokburi-yeonggam")
 
 
-def test_seraphina_prefers_packaged_then_local_wav() -> None:
+def test_anna_prefers_packaged_then_local_wav() -> None:
     from user_storage import REF_WAV_NAME
 
     record = ROOT / "content" / "record_script.txt"
     script = record.read_text(encoding="utf-8").strip() if record.is_file() else "테스트"
 
     old_voice = os.environ.get("STORY_VOICE_DEFAULT_VOICE_DIR")
-    prior = LOCAL_ONLY_VOICES["seraphina"]
+    prior = LOCAL_ONLY_VOICES["anna"]
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -195,28 +195,28 @@ def test_seraphina_prefers_packaged_then_local_wav() -> None:
             dana_root.mkdir()
             os.environ["STORY_VOICE_DEFAULT_VOICE_DIR"] = str(dana_root)
 
-            local_wav = tmp_path / "seraphina_local.wav"
+            local_wav = tmp_path / "anna_local.wav"
             local_wav.write_bytes(b"RIFF" + b"\x03" * 40)
-            LOCAL_ONLY_VOICES["seraphina"] = LocalOnlyVoicePaths(
-                subdir="seraphina",
+            LOCAL_ONLY_VOICES["anna"] = LocalOnlyVoicePaths(
+                subdir="anna",
                 local_wav=local_wav,
             )
 
-            assert resolve_local_only_reference_wav("seraphina") == local_wav
-            wav, _ = ensure_default_reference("seraphina")
+            assert resolve_local_only_reference_wav("anna") == local_wav
+            wav, _ = ensure_default_reference("anna")
             assert wav == local_wav
 
-            packaged_dir = dana_root / "seraphina"
+            packaged_dir = dana_root / "anna"
             packaged_dir.mkdir()
             packaged_wav = packaged_dir / REF_WAV_NAME
             packaged_wav.write_bytes(b"RIFF" + b"\x04" * 40)
             (packaged_dir / "reference.txt").write_text(script + "\n", encoding="utf-8")
 
-            assert resolve_local_only_reference_wav("seraphina") == packaged_wav
-            wav2, _ = ensure_default_reference("seraphina")
+            assert resolve_local_only_reference_wav("anna") == packaged_wav
+            wav2, _ = ensure_default_reference("anna")
             assert wav2 == packaged_wav
     finally:
-        LOCAL_ONLY_VOICES["seraphina"] = prior
+        LOCAL_ONLY_VOICES["anna"] = prior
         if old_voice is None:
             os.environ.pop("STORY_VOICE_DEFAULT_VOICE_DIR", None)
         else:
@@ -228,8 +228,8 @@ def main() -> int:
     test_dana_uses_legacy_default_root()
     test_generation_uses_story_voice_reference()
     test_harry_missing_skips_without_dana_fallback()
-    test_seraphina_missing_skips_without_dana_fallback()
-    test_seraphina_prefers_packaged_then_local_wav()
+    test_anna_missing_skips_without_dana_fallback()
+    test_anna_prefers_packaged_then_local_wav()
     print("OK: default story voices")
     return 0
 

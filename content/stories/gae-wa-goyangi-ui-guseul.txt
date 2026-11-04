@@ -2,7 +2,7 @@
 title: 개와 고양이의 구슬
 id: gae-wa-goyangi-ui-guseul
 order: 11
-defaultVoice: seraphina
+defaultVoice: anna
 ---
 옛날 옛적, 강가에 가난한 할아버지가 개와 고양이를 기르며 살았어요.
 어느 날 할아버지는 커다란 잉어를 잡았는데, 잉어가 눈물을 뚝뚝 흘리고 있었어요.
