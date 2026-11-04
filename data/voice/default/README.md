@@ -2,7 +2,7 @@
 
 신규 회원이 **가입 직후** 들을 수 있는 **공용 기본 낭독**용 참조 음성입니다.
 
-이야기마다 `content/stories/*.txt` front matter의 `defaultVoice: harry|dana|seraphina` 로 목소리가 정해집니다.
+이야기마다 `content/stories/*.txt` front matter의 `defaultVoice: harry|dana|anna` 로 목소리가 정해집니다.
 
 ## Dana (git + Mac mini 레거시)
 
@@ -24,18 +24,18 @@ Harry 기본 낭독은 **다른 목소리로 대체하지 않습니다**. 참조
 
 받아쓰기(txt): wav와 같은 폴더의 같은 이름 `.txt`, 또는 `reference.txt`, 없으면 `content/record_script.txt` (Dana와 동일 스크립트).
 
-## Seraphina (로컬만, git 제외)
+## Anna (로컬만, git 제외)
 
 Edge TTS 음성이라 **녹음 파일은 git에 포함하지 않습니다**. Harry와 같이 참조가 없으면 해당 이야기 기본 낭독 생성을 건너뜁니다.
 
 탐색 순서:
 
-1. `data/voice/default/seraphina/reference.wav` (있으면 우선)
-2. `data/voice/seraphina/reference.wav` (로컬 배포)
+1. `data/voice/default/anna/reference.wav` (있으면 우선)
+2. `data/voice/anna/reference.wav` (로컬 배포)
 
 받아쓰기(txt): wav 옆 `reference.txt` 또는 같은 이름 `.txt`, 없으면 `content/record_script.txt`.
 
-`data/voice/*` 는 `.gitignore` 로 제외되며 (`default/` README·Dana 원본만 예외), Seraphina/Harry 로컬 wav는 커밋되지 않습니다.
+`data/voice/*` 는 `.gitignore` 로 제외되며 (`default/` README·Dana 원본만 예외), Anna/Harry 로컬 wav는 커밋되지 않습니다.
 
 ## 생성 오디오
 

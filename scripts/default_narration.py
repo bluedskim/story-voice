@@ -12,7 +12,7 @@ from user_storage import ROOT, REF_TXT_NAME, REF_WAV_NAME
 
 SYSTEM_USER_ID = 0
 
-DEFAULT_VOICE_IDS = frozenset({"harry", "dana", "seraphina"})
+DEFAULT_VOICE_IDS = frozenset({"harry", "dana", "anna"})
 
 
 @dataclass(frozen=True)
@@ -35,9 +35,9 @@ LOCAL_ONLY_VOICES: dict[str, LocalOnlyVoicePaths] = {
         subdir="harry",
         local_wav=ROOT / "data" / "voice" / "harry" / "harry_script_reference.wav",
     ),
-    "seraphina": LocalOnlyVoicePaths(
-        subdir="seraphina",
-        local_wav=ROOT / "data" / "voice" / "seraphina" / REF_WAV_NAME,
+    "anna": LocalOnlyVoicePaths(
+        subdir="anna",
+        local_wav=ROOT / "data" / "voice" / "anna" / REF_WAV_NAME,
     ),
 }
 
@@ -184,7 +184,7 @@ def has_default_reference(voice_id: str | None = None) -> bool:
 
 def ensure_default_reference(voice_id: str | None = None) -> tuple[Path, Path]:
     """
-    Ensure system reference wav/txt exist for a catalog default voice (harry | dana | seraphina).
+    Ensure system reference wav/txt exist for a catalog default voice (harry | dana | anna).
     Dana uses legacy data/voice/default/ (default-narration-source.wav → reference.wav).
     Local-only voices use packaged reference.wav under default/<voice>/ or a gitignored local wav.
     """

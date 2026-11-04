@@ -2,7 +2,7 @@
 title: 혹부리 영감
 id: hokburi-yeonggam
 order: 3
-defaultVoice: seraphina
+defaultVoice: anna
 ---
 
 옛날 옛적, 어느 마을에 턱에 커다란 혹이 달린 할아버지가 살았어요.

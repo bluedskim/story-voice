@@ -17,15 +17,15 @@ STORY_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 EXPECTED = [
     ("ui-joeun-hyeongje", "의좋은 형제", "dana"),
     ("geum-dokki-eun-dokki", "금도끼 은도끼", "harry"),
-    ("hokburi-yeonggam", "혹부리 영감", "seraphina"),
+    ("hokburi-yeonggam", "혹부리 영감", "anna"),
     ("horangi-wa-gotgam", "호랑이와 곶감", "harry"),
     ("eunhye-gapeun-kkachi", "은혜 갚은 까치", "dana"),
     ("tokki-ui-gan", "토끼의 간", "harry"),
     ("ureong-gaksi", "우렁각시", "dana"),
-    ("cheong-gaeguri", "청개구리", "seraphina"),
+    ("cheong-gaeguri", "청개구리", "anna"),
     ("gyeonu-wa-jiknyeo", "견우와 직녀", "harry"),
     ("namukkun-gwa-seonnyeo", "나무꾼과 선녀", "dana"),
-    ("gae-wa-goyangi-ui-guseul", "개와 고양이의 구슬", "seraphina"),
+    ("gae-wa-goyangi-ui-guseul", "개와 고양이의 구슬", "anna"),
 ]
 
 
@@ -61,7 +61,7 @@ def test_frontend_motifs_cover_catalog() -> None:
 
 
 def test_default_voice_validation() -> None:
-    assert story_default_voice_from_meta({"defaultVoice": "seraphina"}) == "seraphina"
+    assert story_default_voice_from_meta({"defaultVoice": "anna"}) == "anna"
     assert story_default_voice_from_meta({"defaultVoice": "Harry"}) == "harry"
     try:
         story_default_voice_from_meta({"defaultVoice": "unknown"})
