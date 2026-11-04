@@ -46,8 +46,22 @@ def test_app_opens_modal_and_sends_asr_verify() -> None:
     assert "setupAsrHelp" not in APP_JS
 
 
+def test_generation_progress_on_story_card() -> None:
+    assert 'id="gen-progress"' not in INDEX
+    assert "genProgressBarEl" not in APP_JS
+    assert "story-gen-progress" in APP_JS
+    assert "setGenCardProgress" in APP_JS
+    assert "syncGenCardProgressUi" in APP_JS
+    assert "running.chunkIndex || 0" in APP_JS
+    assert "running.chunkTotal || 1" in APP_JS
+    assert "genProgressPercent" in APP_JS
+    assert "만드는 중:" in APP_JS
+    assert "clearGenCardProgress" in APP_JS
+
+
 if __name__ == "__main__":
     test_stories_tab_has_no_always_visible_asr_checkbox()
     test_generation_confirm_modal_copy()
     test_app_opens_modal_and_sends_asr_verify()
+    test_generation_progress_on_story_card()
     print("ok")
