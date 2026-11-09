@@ -30,6 +30,7 @@ from auth_db import AuthDatabase
 from auth_config import ensure_session_secret
 from auth_email import is_log_mail_mode
 from static_assets import app_js_served_body, auth_js_served_body, inject_asset_versions, web_asset_versions
+from seo import inject_public_origin, robots_txt_body, sitemap_xml_body
 from auth_service import (
     AuthError,
     login,
@@ -214,6 +215,26 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
         if route != "/" and route.endswith("/"):
             route = route.rstrip("/")
 
+        if route == "/robots.txt":
+            body = robots_txt_body().encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if route == "/sitemap.xml":
+            body = sitemap_xml_body().encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if route == "/api/config":
             csrf = self._csrf_token_for_config()
             user = self._current_user()
@@ -363,7 +384,8 @@ class StoryVoiceHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.NOT_FOUND)
                 return
             versions = web_asset_versions()
-            body = inject_asset_versions(file_path.read_text(encoding="utf-8"), versions).encode("utf-8")
+            html = inject_public_origin(inject_asset_versions(file_path.read_text(encoding="utf-8"), versions))
+            body = html.encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
