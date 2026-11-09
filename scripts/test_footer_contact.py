@@ -25,7 +25,8 @@ def test_footer_has_single_contact_mailto() -> None:
 
 def test_contact_address_not_visible_text() -> None:
     no_comments = re.sub(r"<!--.*?-->", "", INDEX, flags=re.S)
-    visible = re.sub(r"<[^>]+>", " ", no_comments)
+    no_scripts = re.sub(r"<script[^>]*>.*?</script>", " ", no_comments, flags=re.S | re.I)
+    visible = re.sub(r"<[^>]+>", " ", no_scripts)
     assert "@" not in visible
     assert "bluedskim" not in visible
 
