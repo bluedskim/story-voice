@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +20,14 @@ from default_generation import (
     resolve_narrator_voice,
     role_voice_map_for_story,
 )
-from default_narration import DEFAULT_VOICE_IDS, SYSTEM_USER_ID, can_generate_default_narration
+from default_narration import (
+    DEFAULT_VOICE_IDS,
+    LOCAL_ONLY_VOICES,
+    LocalOnlyVoicePaths,
+    SYSTEM_USER_ID,
+    can_generate_default_narration,
+    local_only_reference_available,
+)
 from generation_backends import FakeGenerationBackend
 from generation_service import GenerationService
 from role_assignments import story_speaker_keys
@@ -39,6 +47,29 @@ SERAPHINA_REMOVED_ROLES: dict[str, str] = {
     "namukkun-gwa-seonnyeo": "사슴",
     "gae-wa-goyangi-ui-guseul": "할아버지",
 }
+
+
+@contextmanager
+def _isolated_local_only_refs(tmp_path: Path, *, available: frozenset[str]):
+    """Point harry/anna local-only paths at temp dirs (ignore repo data/voice/*)."""
+    prior = {k: LOCAL_ONLY_VOICES[k] for k in LOCAL_ONLY_VOICES}
+    isolated_root = tmp_path / "isolated_local_only"
+    try:
+        for voice, paths in prior.items():
+            if voice in available:
+                local_wav = isolated_root / voice / "reference.wav"
+                local_wav.parent.mkdir(parents=True, exist_ok=True)
+                local_wav.write_bytes(b"RIFF" + voice.encode()[:4])
+            else:
+                local_wav = isolated_root / voice / "definitely_missing.wav"
+            LOCAL_ONLY_VOICES[voice] = LocalOnlyVoicePaths(
+                subdir=paths.subdir,
+                local_wav=local_wav,
+            )
+        yield
+    finally:
+        for voice, paths in prior.items():
+            LOCAL_ONLY_VOICES[voice] = paths
 
 
 def _voice_fixtures(tmp_path: Path, script: str, *, voices: tuple[str, ...]) -> Path:
@@ -111,6 +142,7 @@ def test_missing_mapped_voice_falls_back_but_still_generates() -> None:
     script = record.read_text(encoding="utf-8").strip() if record.is_file() else "테스트"
     old_voice = os.environ.get("STORY_VOICE_DEFAULT_VOICE_DIR")
     old_audio = os.environ.get("STORY_VOICE_DEFAULT_AUDIO_DIR")
+    role_map = role_voice_map_for_story("geum-dokki-eun-dokki")
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -118,32 +150,52 @@ def test_missing_mapped_voice_falls_back_but_still_generates() -> None:
                 _voice_fixtures(tmp_path, script, voices=("harry", "dana"))
             )
             os.environ["STORY_VOICE_DEFAULT_AUDIO_DIR"] = str(tmp_path / "audio")
-            resolved = resolve_narrator_voice("geum-dokki-eun-dokki")
-            assert resolved == "harry"
-            assert (
-                effective_voice_for_role(
-                    "산신령",
-                    story_id="geum-dokki-eun-dokki",
-                    narrator_voice=resolved,
-                    role_map=role_voice_map_for_story("geum-dokki-eun-dokki"),
-                )
-                == "harry"
-            )
-            _load_role_voice_maps.cache_clear()
-            plan = build_default_generation_plan("geum-dokki-eun-dokki")
-            assert len(plan.slot_refs) == 2
-            assert plan.assignments["산신령"] == plan.assignments[NARRATOR_ROLE_KEY]
 
-            backend = FakeGenerationBackend(chunk_delay=0)
-            svc = GenerationService(backend=backend)
-            result = svc.enqueue_story("geum-dokki-eun-dokki", SYSTEM_USER_ID)
-            assert result.created
-            deadline = time.time() + 5.0
-            job = svc._get_job(result.job.job_id)
-            while job and job.state.value not in {"done", "failed"} and time.time() < deadline:
-                time.sleep(0.05)
+            with _isolated_local_only_refs(tmp_path, available=frozenset({"harry"})):
+                assert not local_only_reference_available("anna")
+                _load_role_voice_maps.cache_clear()
+                resolved = resolve_narrator_voice("geum-dokki-eun-dokki")
+                assert resolved == "harry"
+                assert (
+                    effective_voice_for_role(
+                        "산신령",
+                        story_id="geum-dokki-eun-dokki",
+                        narrator_voice=resolved,
+                        role_map=role_map,
+                    )
+                    == "harry"
+                )
+                plan = build_default_generation_plan("geum-dokki-eun-dokki")
+                assert len(plan.slot_refs) == 2
+                assert plan.assignments["산신령"] == plan.assignments[NARRATOR_ROLE_KEY]
+
+                backend = FakeGenerationBackend(chunk_delay=0)
+                svc = GenerationService(backend=backend)
+                result = svc.enqueue_story("geum-dokki-eun-dokki", SYSTEM_USER_ID)
+                assert result.created
+                deadline = time.time() + 5.0
                 job = svc._get_job(result.job.job_id)
-            assert job and job.state.value == "done", job.error if job else "no job"
+                while job and job.state.value not in {"done", "failed"} and time.time() < deadline:
+                    time.sleep(0.05)
+                    job = svc._get_job(result.job.job_id)
+                assert job and job.state.value == "done", job.error if job else "no job"
+
+            voice_root = Path(os.environ["STORY_VOICE_DEFAULT_VOICE_DIR"])
+            anna_dir = voice_root / "anna"
+            anna_dir.mkdir(parents=True, exist_ok=True)
+            (anna_dir / "reference.wav").write_bytes(b"RIFFanna")
+            (anna_dir / "reference.txt").write_text(script + "\n", encoding="utf-8")
+            with _isolated_local_only_refs(tmp_path, available=frozenset({"harry", "anna"})):
+                assert local_only_reference_available("anna")
+                assert (
+                    effective_voice_for_role(
+                        "산신령",
+                        story_id="geum-dokki-eun-dokki",
+                        narrator_voice="harry",
+                        role_map=role_map,
+                    )
+                    == "anna"
+                )
     finally:
         if old_voice is None:
             os.environ.pop("STORY_VOICE_DEFAULT_VOICE_DIR", None)
