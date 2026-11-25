@@ -162,10 +162,10 @@ def local_only_reference_detail(voice_id: str) -> str:
 
 
 def can_generate_default_narration(story_id: str) -> bool:
-    voice = story_default_voice(story_id)
-    if voice in LOCAL_ONLY_VOICES:
-        return local_only_reference_available(voice)
-    return True
+    from default_generation import any_default_voice_reference_available
+
+    del story_id  # generation proceeds if any built-in reference is available
+    return any_default_voice_reference_available()
 
 
 def default_story_audio(story_id: str) -> Path:

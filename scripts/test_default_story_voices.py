@@ -110,7 +110,7 @@ def test_generation_uses_story_voice_reference() -> None:
             os.environ["STORY_VOICE_DEFAULT_AUDIO_DIR"] = old_audio
 
 
-def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: str) -> None:
+def test_local_only_missing_narrator_falls_back_and_generates(voice: str, story_id: str) -> None:
     record = ROOT / "content" / "record_script.txt"
     script = record.read_text(encoding="utf-8").strip() if record.is_file() else "테스트"
 
@@ -125,6 +125,16 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
             dana_root.mkdir(parents=True)
             (dana_root / "reference.wav").write_bytes(b"RIFF" + b"\x00" * 40)
             (dana_root / "reference.txt").write_text(script + "\n", encoding="utf-8")
+            if voice != "anna":
+                anna_dir = dana_root / "anna"
+                anna_dir.mkdir(parents=True)
+                (anna_dir / "reference.wav").write_bytes(b"RIFF" + b"\x02" * 40)
+                (anna_dir / "reference.txt").write_text(script + "\n", encoding="utf-8")
+            if voice != "harry":
+                harry_dir = dana_root / "harry"
+                harry_dir.mkdir(parents=True)
+                (harry_dir / "reference.wav").write_bytes(b"RIFF" + b"\x01" * 40)
+                (harry_dir / "reference.txt").write_text(script + "\n", encoding="utf-8")
 
             # Do not rely on gitignored production refs under data/voice/{harry,anna}/.
             LOCAL_ONLY_VOICES[voice] = LocalOnlyVoicePaths(
@@ -136,8 +146,7 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
             os.environ["STORY_VOICE_DEFAULT_AUDIO_DIR"] = str(audio_dir)
 
             assert not local_only_reference_available(voice)
-            assert not can_generate_default_narration(story_id)
-            assert can_generate_default_narration("ui-joeun-hyeongje")
+            assert can_generate_default_narration(story_id)
 
             try:
                 ensure_default_reference(voice)
@@ -155,9 +164,9 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
             while job and job.state.value not in {"done", "failed"} and time.time() < deadline:
                 time.sleep(0.05)
                 job = svc._get_job(result.job.job_id)
-            assert job and job.state.value == "done"
-            assert backend.last_ref_wav is None
-            assert not (audio_dir / f"{story_id}.m4a").is_file()
+            assert job and job.state.value == "done", job.error if job else "no job"
+            assert backend.last_multivoice is True
+            assert (audio_dir / f"{story_id}.m4a").is_file()
 
             assert resolve_local_only_reference_wav(voice) is None
     finally:
@@ -172,12 +181,12 @@ def test_local_only_missing_skips_without_dana_fallback(voice: str, story_id: st
             os.environ["STORY_VOICE_DEFAULT_AUDIO_DIR"] = old_audio
 
 
-def test_harry_missing_skips_without_dana_fallback() -> None:
-    test_local_only_missing_skips_without_dana_fallback("harry", "geum-dokki-eun-dokki")
+def test_harry_missing_narrator_falls_back_to_dana() -> None:
+    test_local_only_missing_narrator_falls_back_and_generates("harry", "geum-dokki-eun-dokki")
 
 
-def test_anna_missing_skips_without_dana_fallback() -> None:
-    test_local_only_missing_skips_without_dana_fallback("anna", "hokburi-yeonggam")
+def test_anna_missing_narrator_falls_back_to_dana() -> None:
+    test_local_only_missing_narrator_falls_back_and_generates("anna", "hokburi-yeonggam")
 
 
 def test_anna_prefers_packaged_then_local_wav() -> None:
@@ -227,8 +236,8 @@ def main() -> int:
     test_catalog_default_voices()
     test_dana_uses_legacy_default_root()
     test_generation_uses_story_voice_reference()
-    test_harry_missing_skips_without_dana_fallback()
-    test_anna_missing_skips_without_dana_fallback()
+    test_harry_missing_narrator_falls_back_to_dana()
+    test_anna_missing_narrator_falls_back_to_dana()
     test_anna_prefers_packaged_then_local_wav()
     print("OK: default story voices")
     return 0

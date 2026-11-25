@@ -24,7 +24,6 @@ from default_narration import (
     LOCAL_ONLY_VOICES,
     can_generate_default_narration,
     default_story_audio,
-    ensure_default_reference_for_story,
     local_only_reference_detail,
     story_default_voice,
 )
@@ -328,19 +327,15 @@ class GenerationService:
                     job.chunk_total = total
 
                 if job.user_id == SYSTEM_USER_ID:
-                    try:
-                        ref_wav, ref_txt = ensure_default_reference_for_story(story_id)
-                    except DefaultReferenceUnavailable as exc:
-                        log.warning("Skipping default narration generation: %s", exc)
-                        continue
-                    self._backend.generate_story(
+                    from default_generation import generate_default_story
+
+                    generate_default_story(
+                        self._backend,
                         story_id,
                         story.body,
                         tmp_out,
                         on_progress,
                         verify_asr=job.asr_verify,
-                        ref_wav=ref_wav,
-                        ref_txt=ref_txt,
                     )
                 else:
                     if is_admin:
