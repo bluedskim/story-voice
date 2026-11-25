@@ -8,13 +8,15 @@
   "geum-dokki-eun-dokki": {
     "roles": {
       "나무꾼": "dana",
-      "산신령": "anna"
+      "산신령": "anna",
+      "이웃": "dana"
     }
   },
   "hokburi-yeonggam": {
     "roles": {
       "할아버지": "harry",
-      "도깨비": "dana"
+      "도깨비": "dana",
+      "욕심쟁이": "harry"
     }
   },
   "horangi-wa-gotgam": {
@@ -31,36 +33,42 @@
   "tokki-ui-gan": {
     "roles": {
       "용왕": "dana",
-      "자라": "anna"
+      "자라": "anna",
+      "토끼": "anna"
     }
   },
   "ureong-gaksi": {
     "roles": {
       "총각": "harry",
-      "우렁각시": "anna"
+      "우렁각시": "anna",
+      "원님": "harry"
     }
   },
   "cheong-gaeguri": {
     "roles": {
       "엄마": "dana",
-      "청개구리": "harry"
+      "청개구리": "harry",
+      "이웃": "harry"
     }
   },
   "gyeonu-wa-jiknyeo": {
     "roles": {
-      "직녀": "anna"
+      "직녀": "anna",
+      "옥황상제": "dana"
     }
   },
   "namukkun-gwa-seonnyeo": {
     "roles": {
       "나무꾼": "harry",
-      "선녀": "anna"
+      "선녀": "anna",
+      "사슴": "harry"
     }
   },
   "gae-wa-goyangi-ui-guseul": {
     "roles": {
       "개": "harry",
-      "고양이": "dana"
+      "고양이": "dana",
+      "할아버지": "harry"
     }
   }
 }

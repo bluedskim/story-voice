@@ -27,6 +27,9 @@ DEFAULT_ROLE_VOICES_PATH = ROOT / "content" / "default_role_voices.json"
 
 log = logging.getLogger("story_voice.default_generation")
 
+# When preferred narrator reference is missing; also used as last-resort generation order.
+NARRATOR_FALLBACK_ORDER: tuple[str, ...] = ("dana", "harry", "anna")
+
 ProgressCallback = Callable[[int, int, str], None]
 
 
@@ -65,6 +68,34 @@ def _voice_reference_available(voice_id: str) -> bool:
     if voice_id in LOCAL_ONLY_VOICES:
         return local_only_reference_available(voice_id)
     return has_default_reference(voice_id)
+
+
+def any_default_voice_reference_available() -> bool:
+    return any(_voice_reference_available(v) for v in NARRATOR_FALLBACK_ORDER)
+
+
+def resolve_narrator_voice(story_id: str) -> str:
+    """Catalog narrator voice, or first available built-in in dana > harry > anna order."""
+    preferred = story_default_voice(story_id)
+    ordered: list[str] = []
+    for v in (preferred, *NARRATOR_FALLBACK_ORDER):
+        if v not in ordered:
+            ordered.append(v)
+    for voice_id in ordered:
+        if _voice_reference_available(voice_id):
+            if voice_id != preferred:
+                log.warning(
+                    "Default narrator voice %s unavailable for %s; using %s",
+                    preferred,
+                    story_id,
+                    voice_id,
+                )
+            return voice_id
+    raise DefaultReferenceUnavailable(
+        preferred,
+        story_id=story_id,
+        detail="no built-in default voice reference available (dana, harry, anna)",
+    )
 
 
 def resolve_default_voice_reference(
@@ -127,10 +158,7 @@ def build_default_generation_plan(story_id: str) -> MemberGenerationPlan:
     """Resolve built-in references for narrator + mapped roles (max 3 voices)."""
     markup = story_markup_body_from_id(story_id)
     role_map = role_voice_map_for_story(story_id)
-    narrator_voice = story_default_voice(story_id)
-
-    if not _voice_reference_available(narrator_voice):
-        raise DefaultReferenceUnavailable(narrator_voice, story_id=story_id)
+    narrator_voice = resolve_narrator_voice(story_id)
 
     voice_for_slot: dict[str, int] = {}
     slot_refs: dict[int, tuple[Path, Path]] = {}

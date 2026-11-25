@@ -327,16 +327,8 @@ class GenerationService:
                     job.chunk_total = total
 
                 if job.user_id == SYSTEM_USER_ID:
-                    try:
-                        from default_generation import build_default_generation_plan, generate_default_story
+                    from default_generation import generate_default_story
 
-                        build_default_generation_plan(story_id)
-                    except DefaultReferenceUnavailable as exc:
-                        log.warning("Skipping default narration generation: %s", exc)
-                        continue
-                    except KeyError:
-                        log.warning("Skipping default narration generation: no role map for %s", story_id)
-                        continue
                     generate_default_story(
                         self._backend,
                         story_id,
