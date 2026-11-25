@@ -1,0 +1,66 @@
+{
+  "ui-joeun-hyeongje": {
+    "roles": {
+      "형": "harry",
+      "아우": "anna"
+    }
+  },
+  "geum-dokki-eun-dokki": {
+    "roles": {
+      "나무꾼": "dana",
+      "산신령": "anna"
+    }
+  },
+  "hokburi-yeonggam": {
+    "roles": {
+      "할아버지": "harry",
+      "도깨비": "dana"
+    }
+  },
+  "horangi-wa-gotgam": {
+    "roles": {
+      "엄마": "dana",
+      "호랑이": "anna"
+    }
+  },
+  "eunhye-gapeun-kkachi": {
+    "roles": {
+      "여인": "anna"
+    }
+  },
+  "tokki-ui-gan": {
+    "roles": {
+      "용왕": "dana",
+      "자라": "anna"
+    }
+  },
+  "ureong-gaksi": {
+    "roles": {
+      "총각": "harry",
+      "우렁각시": "anna"
+    }
+  },
+  "cheong-gaeguri": {
+    "roles": {
+      "엄마": "dana",
+      "청개구리": "harry"
+    }
+  },
+  "gyeonu-wa-jiknyeo": {
+    "roles": {
+      "직녀": "anna"
+    }
+  },
+  "namukkun-gwa-seonnyeo": {
+    "roles": {
+      "나무꾼": "harry",
+      "선녀": "anna"
+    }
+  },
+  "gae-wa-goyangi-ui-guseul": {
+    "roles": {
+      "개": "harry",
+      "고양이": "dana"
+    }
+  }
+}

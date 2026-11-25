@@ -35,6 +35,24 @@ class GenerationBackend(ABC):
     ) -> None:
         pass
 
+    def generate_default_story(
+        self,
+        plan: "MemberGenerationPlan",
+        story_text_stripped: str,
+        output_path: Path,
+        on_progress: ProgressCallback,
+        *,
+        verify_asr: bool = False,
+    ) -> None:
+        """Shared default catalog audio (built-in voices, multivoice when plan says so)."""
+        self.generate_member_story(
+            plan,
+            story_text_stripped,
+            output_path,
+            on_progress,
+            verify_asr=verify_asr,
+        )
+
     def generate_member_story(
         self,
         plan: "MemberGenerationPlan",
