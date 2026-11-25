@@ -388,7 +388,14 @@ def narrate_story(
     )
     t_total = time.time()
     try:
-        active_model = tts_session.model if tts_session else model
+        if tts_session is not None:
+            active_model = tts_session.model
+        elif model is None:
+            raise RuntimeError(
+                "TTS model is unloaded; use StoryGenerator._load_model() before narrating"
+            )
+        else:
+            active_model = model
         _files, sr, t_tts = generate_chunks_to_wav(
             active_model,
             chunks,
@@ -548,7 +555,7 @@ class StoryGenerator:
             output_path,
             self.ref_audio,
             self.ref_text,
-            self._model,
+            self._load_model(),
             max_chars=self.max_chars,
             sentence_pause=self.sentence_pause,
             paragraph_pause=self.paragraph_pause,

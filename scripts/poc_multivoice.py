@@ -105,7 +105,7 @@ def main() -> int:
         story_text,
         out,
         resolve_chunk,
-        gen.model,
+        gen._load_model(),
         max_chars=args.max_chars,
         temperature=args.temperature,
         dialogue_style=dialogue_style,
