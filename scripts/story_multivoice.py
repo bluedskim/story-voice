@@ -129,7 +129,14 @@ def narrate_story_multivoice(
     )
     t_total = time.time()
     try:
-        active_model = tts_session.model if tts_session else model
+        if tts_session is not None:
+            active_model = tts_session.model
+        elif model is None:
+            raise RuntimeError(
+                "TTS model is unloaded; use StoryGenerator._load_model() before narrating"
+            )
+        else:
+            active_model = model
 
         def _ref_for_index(i: int) -> object:
             return resolve_voice(chunk_objs[i])

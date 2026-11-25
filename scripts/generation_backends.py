@@ -254,7 +254,7 @@ class MLXGenerationBackend(GenerationBackend):
             on_progress(current, total, plan.story_id)
 
         on_progress(0, total, plan.story_id)
-        active_model = generator.model
+        active_model = generator._load_model()
         narrate_story_multivoice(
             plan.markup_body,
             output_path,

@@ -166,7 +166,8 @@ def test_mlx_multivoice_passes_on_chunk() -> None:
             fake_gen.temperature = None
             fake_gen.dialogue_style = True
             fake_gen.narration_config.verify_asr = False
-            fake_gen.model = object()
+            fake_model = object()
+            fake_gen._load_model = MagicMock(return_value=fake_model)
             backend._generator = fake_gen
 
             out = Path(tmp) / "out.m4a"
